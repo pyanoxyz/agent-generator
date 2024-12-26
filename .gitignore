@@ -1,0 +1,6 @@
+.env
+models
+.DS_Store
+env
+eliza-source
+data

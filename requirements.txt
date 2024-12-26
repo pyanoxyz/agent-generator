@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+langchain
+chromadb
+sentence-transformers
+together
+pydantic
+python-dotenv
+langchain-community
+python-dotenv
+langchain-huggingface
+langchain-together
+einops
+opt_einsum
+unstructured
+libmagic
+langchain_chroma
