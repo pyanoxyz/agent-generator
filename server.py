@@ -84,7 +84,7 @@ class CharacterResponse(BaseModel):
     # reference_sources: List[str]
 
 class EnvironmentResponse(BaseModel):
-    environment_file: List[str]
+    environment_file: str
 
 
 # def create_character_template(character_request: CharacterRequest, context: List[str]) -> str:
@@ -1370,7 +1370,6 @@ async def generate_enviroment(request: enviromentRequest):
         # Return response with character JSON and sources
         return EnvironmentResponse(
             environment_file=response,
-            # reference_sources=[doc.metadata['source'] for doc in result['source_documents']]
         )
         
     except Exception as e:
