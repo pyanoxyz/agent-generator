@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 
 import logging
 from dotenv import load_dotenv
+import re
 
 
 load_dotenv() 
@@ -915,7 +916,7 @@ Now your task is to understand the user query and requirements and curate a char
     Name: {character_request.name}
     Description: {character_request.description}
     Personality Traits: {', '.join(character_request.personality_traits)}
-    
+
     Generate a complete character.json that matches the structure found in the codebase but with unique
     and creative content for this new character. Include bio, lore, message examples, and style guidelines.
     The response should be valid JSON.
@@ -1301,6 +1302,15 @@ However only include the variables that are required.
 """
     
 
+def extract_json(response):
+    """Extract the JSON from the response"""
+    match = re.search(r'```json(.*?)```', response, re.DOTALL)
+    if match:
+        json_str = match.group(1).strip()
+        return json.loads(json_str)
+    else:
+        return json.loads(response)
+
 @app.post("/generate_character", response_model=CharacterResponse)
 async def generate_character(request: CharacterRequest):
     """Generate a character.json based on the request"""
@@ -1319,7 +1329,7 @@ async def generate_character(request: CharacterRequest):
         messages = [
             (
                 "system",
-                "You are a helpful assistant.",
+                "You are to return json file only. No backtics or codeblock",
             ),
             (prompt),
     ]
@@ -1330,8 +1340,9 @@ async def generate_character(request: CharacterRequest):
         # Parse and validate the generated JSON
         try:
             logger.info(response)
-            character_json = json.loads(response)
-            with open(f"characters/{character_json.name}.json", "w+") as f:
+            character_json = extract_json(response)
+            logger.info(f"saved to {character_json['name']}.json")
+            with open(f"characters/{character_json['name']}.json", "w+") as f:
                 json.dump(character_json, f, indent=2)
         except json.JSONDecodeError:
             raise HTTPException(status_code=422, detail="Generated invalid JSON")
