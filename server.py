@@ -41,7 +41,7 @@ app.add_middleware(
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
 llm = ChatTogether(
-    model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    model="Qwen/QwQ-32B-Preview",
     together_api_key=TOGETHER_API_KEY,
     temperature=0.7,
     max_tokens=16000
@@ -1331,6 +1331,8 @@ async def generate_character(request: CharacterRequest):
         try:
             logger.info(response)
             character_json = json.loads(response)
+            with open(f"characters/{character_json.name}.json", "w+") as f:
+                json.dump(character_json, f, indent=2)
         except json.JSONDecodeError:
             raise HTTPException(status_code=422, detail="Generated invalid JSON")
         
