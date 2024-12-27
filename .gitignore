@@ -4,3 +4,5 @@ models
 env
 eliza-source
 data
+__pycache__
+characters/*
