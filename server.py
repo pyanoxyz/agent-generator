@@ -75,7 +75,7 @@ class CharacterRequest(BaseModel):
 
 class CharacterResponse(BaseModel):
     character_json: dict
-    reference_sources: List[str]
+    # reference_sources: List[str]
 
 
 # def create_character_template(character_request: CharacterRequest, context: List[str]) -> str:
