@@ -100,7 +100,7 @@ Sample conversations for establishing interaction patterns, helps establish the 
 ]
 
 postExamples
-Sample social media posts to guide content style: Give atleast 5 examples
+Sample social media posts to guide content style
 "postExamples": [
   "No tax on tips, overtime, or social security for seniors!",
   "End inflation and make America affordable again."
@@ -339,6 +339,7 @@ C3po :
 }
 
 Now your task is to understand the user query and requirements and curate a character.json specific to the user query.
+Give atleast 5 post examples.
 Use modelProvider, clients based on the prompt, if they are not in prompt use openai and twitter default respectively. 
 """
     return f"""{prompt}
