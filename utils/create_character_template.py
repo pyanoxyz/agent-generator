@@ -100,7 +100,7 @@ Sample conversations for establishing interaction patterns, helps establish the 
 ]
 
 postExamples
-Sample social media posts to guide content style:
+Sample social media posts to guide content style: Give atleast 5 examples
 "postExamples": [
   "No tax on tips, overtime, or social security for seniors!",
   "End inflation and make America affordable again."
