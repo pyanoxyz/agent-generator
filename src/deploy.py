@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import Form, UploadFile, File
+from src.get_balance import get_account_balance, get_token_balance
+
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
 # Go up one level to get to the root directory where .env is
@@ -21,7 +23,10 @@ root_dir = current_dir.parent
 load_dotenv(root_dir / '.env')
 
 # Initialize MongoDB client
-mongodb_uri = os.getenv('MONGODB_URI')  # Replace with your MongoDB URI
+mongodb_uri = os.getenv('MONGODB_URI')
+token_address = os.getenv('TOKEN_ADDRESS')
+balance_threshold = os.getenv('BALANCE_THRESHOLD')
+
 client = MongoClient(mongodb_uri)
 db = client.users  # Replace with your database name
 
@@ -74,11 +79,6 @@ async def register(request: SignatureRequest):
     except Exception as e:
         logger.error(f"Error in wallet verification: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-
 
 """
 const formData = new FormData();
@@ -152,6 +152,17 @@ async def store_character_data(
         except ValidationError:
             raise HTTPException(status_code=400, detail="Invalid client configuration")
 
+        if token_address:
+           crypto_balance = get_token_balance(address, token_address)
+        else:
+           crypto_balance = get_account_balance(address)
+
+        if crypto_balance < float(balance_threshold):
+             raise HTTPException(status_code=500, detail=f"This wallet doesnt have sufficient balance {crypto_balance}")
+
+        
+        logger.success(f"{address} BALANCE is {crypto_balance}")
+
         # Store in MongoDB
         result = db.users.update_one(
             {"address": address},
@@ -161,8 +172,6 @@ async def store_character_data(
             }},
             upsert=True
         )
-
-
         return {
             "character": character,
             "client": client.dict(),
