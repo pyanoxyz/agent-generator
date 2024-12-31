@@ -23,7 +23,7 @@ import re
 from utils.create_character_template import create_character_template
 from utils.create_environment_template import create_environment_template
 import datetime
-
+from src.deploy import deploy_router
 
 load_dotenv() 
 # Configure logging
@@ -31,6 +31,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+app.include_router(deploy_router, prefix="/api/v1", tags=["auth"])
 
 # CORS middleware configuration
 app.add_middleware(
