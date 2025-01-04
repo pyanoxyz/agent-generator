@@ -105,6 +105,7 @@ async def store_character_data(
     character: str = Form(None),
     signature: str = Form(None),
     message: str = Form(None),
+# todo attachments
     client_twitter: Optional[str] = Form(None),
     client_discord: Optional[str] = Form(None),
     client_telegram: Optional[str] = Form(None)
@@ -178,6 +179,110 @@ async def store_character_data(
             "signature": signature,
             "message": message
         }
+    #  return DeployResponse(
+    #     status="success",
+    #     deploymentId=deployment_id,
+    #     message="Deployment started successfully"
+    # )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+# add attahments in the arguments of /deploy api for pdf/.txt files of knowledge processing
+# /deploy api should return success or failiure ok deplyment 
+# interface DeployResponse {
+#   status: 'success' | 'failure';
+#   deploymentId: string;
+#   message: string;
+# }
+# ping api for deployment status loading,deployment successful, deployment failure
+# GET /deploy/{deploymentId}/status
+# interface DeploymentStatusResponse {
+#   status: 'loading' | 'successful' | 'failed';
+#   progress?: number;
+#   error?: string;
+#   completedAt?: string;
+# }
+
+
+# List All Agents
+# GET /agents
+# Returns a list of all available agents with basic information.
+# Response Format
+# interface AgentListResponse {
+#   agents: Array<{
+#     id: string;
+#     name: string;
+#     client: string;
+#     bioFirstLine: string;
+#     status?: 'running' | 'stopped';
+#   }>;
+# }
+# Example Response
+# {
+#   "agents": [
+#     {
+#       "id": "agent-123",
+#       "name": "Assistant Alpha",
+#       "client": "twitter",
+#       "bioFirstLine": "A helpful AI assistant focused on technical support",
+#       "status": "running"
+#     }
+#   ]
+# }
+
+
+# Get Agent Details
+# GET /agents/{agentId}
+# Returns detailed information about a specific agent.
+# Response Format
+# interface AgentDetailResponse {
+#   character: Character;  // As per the provided Character interface
+#   summary: string;      // Markdown supported
+#   status: 'running' | 'stopped';
+# }
+# {
+#   "character": {
+#     "id": "agent-123",
+#     "name": "Assistant Alpha",
+#     "modelProvider": "OpenAI",
+#     "clients": ["twitter"],
+#     "bio": [
+#       "A helpful AI assistant focused on technical support",
+#       "Specializes in software development and system architecture"
+#     ],
+#     "lore": ["Created in 2024", "Trained on technical documentation"],
+#     "knowledge": ["JavaScript", "Python", "System Design"],
+#     "messageExamples": [
+#       [
+#         {
+#           "user": "How do I optimize my database?",
+#           "content": { "text": "Let's analyze your current setup first..." }
+#         }
+#       ]
+#     ],
+#     "postExamples": ["Writing clear technical documentation..."],
+#     "topics": ["Technology", "Programming", "System Design"],
+#     "style": {
+#       "all": ["Professional", "Technical"],
+#       "chat": ["Concise", "Precise"],
+#       "post": ["Detailed", "Well-structured"]
+#     },
+#     "adjectives": ["Knowledgeable", "Efficient"]
+#   },
+#   "summary": "# Assistant Alpha\n\nA technical support specialist with expertise in software development and system architecture. Provides clear, actionable advice while maintaining a professional demeanor.",
+#   "status": "running"
+# }
+# Error Handling
+# The API should return appropriate HTTP status codes:
+# 200: Successful request
+# 404: Agent not found
+# 500: Server error
+# interface ErrorResponse {
+#   error: {
+#     code: string;
+#     message: string;
+#   };
+# }
+
+# Implement authentication/authorization mechanisms also for min wallet balance
