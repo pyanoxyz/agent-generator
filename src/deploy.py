@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import boto3
+import hashlib
 from web3 import Web3
 from web3.auto import w3
 from loguru import logger
@@ -138,6 +139,8 @@ async def deploy(
         # Parse character JSON
         try:
             character_content = await character.read()
+            character_content_md5_hash = hashlib.md5(character_content).hexdigest()
+            
             character_json = json.loads(character_content.decode())
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid JSON in character file")
@@ -145,7 +148,15 @@ async def deploy(
             raise HTTPException(status_code=400, detail="Character file must be a valid UTF-8 encoded JSON file")
         finally:
             await character.close()
+        
+        ##check if the same character.json exists in the database already 
+
+        
         # Upload character.json to S3
+        if await find_character_json(address, character_content_md5_hash):
+            raise HTTPException(status_code=500, detail=f"Agent has already been deployed or deployment in process")
+
+
         character_s3_url = await upload_character_to_s3(
             address,
             agent_id,
@@ -229,7 +240,7 @@ async def deploy(
         logger.success(f"{address} BALANCE is {crypto_balance}")
 
         # Store in MongoDB
-        await update_agent(address, agent_id, character_s3_url, s3_url_knowledge_files, client)
+        await update_agent(address, agent_id, character_s3_url, character_content_md5_hash, s3_url_knowledge_files, client)
 
         return {
             "agent_id": agent_id,
@@ -251,7 +262,7 @@ async def if_user_in_db(address):
         raise HTTPException(status_code=500, detail=f"User {address} must register first")
 
 
-async def update_agent(address: str, agent_id: str, character_s3_url: str, s3_url_knowledge_files: List[str], client: ClientConfig):
+async def update_agent(address: str, agent_id: str, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str], client: ClientConfig):
     result = db.agents.update_one(
             {"agent_id": agent_id},
             {"$set": {
@@ -259,9 +270,19 @@ async def update_agent(address: str, agent_id: str, character_s3_url: str, s3_ur
                 "version": "v1",
                 "address": address,
                 "character": character_s3_url,
+                "character_content_md5_hash": md5_hash,
                 "client": client.dict(),
                 "knowledge": s3_url_knowledge_files # Add knowledge data to storage
             }},
             upsert=True
         )
     return
+
+
+async def find_character_json(address: str, md5_hash: str):
+    result = db.agents.find_one({
+                "address": address,
+                "character_content_md5_hash": md5_hash,
+            }
+        )
+    return result
