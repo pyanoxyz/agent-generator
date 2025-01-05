@@ -14,23 +14,32 @@ from langchain.prompts import PromptTemplate
 # from langchain_community.llms import Together
 from langchain_together import Together
 from langchain_together import ChatTogether
+from pathlib import Path
 
 from langchain_openai import ChatOpenAI
 
 import logging
 from dotenv import load_dotenv
 import re
-from utils.create_character_template import create_character_template
-from utils.create_environment_template import create_environment_template
+from src.utils.create_character_template import create_character_template
+from src.utils.create_environment_template import create_environment_template
 import datetime
+from src.deploy import deploy_router
+from loguru import logger
+from fastapi import Form, UploadFile, File
+# Get the parent directory of the current file (src/)
+current_dir = Path(__file__).parent
+# Go up one level to get to the root directory where .env is
+root_dir = current_dir.parent
 
+# Load .env from the root directory
+load_dotenv(root_dir / '.env')
 
-load_dotenv() 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
 app = FastAPI()
+app.include_router(deploy_router, prefix="/api/v1")
 
 # CORS middleware configuration
 app.add_middleware(
@@ -42,7 +51,6 @@ app.add_middleware(
 )
 
 # Initialize Together AI client
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
 llm = ChatTogether(
     model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
