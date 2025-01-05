@@ -1,24 +1,30 @@
 import os
+import re
+import io
 import uuid
 import json
+import magic
 import boto3
 import hashlib
+import mimetypes
+import fitz
+from PIL import Image
 from web3 import Web3
 from web3.auto import w3
 from loguru import logger
 from pathlib import Path
 from  datetime import datetime
 from dotenv import load_dotenv
-from typing import Optional, Dict
-from pymongo import MongoClient
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends
-from eth_account.messages import encode_defunct
-from pydantic import BaseModel, Field, ValidationError
+from typing import Optional, Dict
 from fastapi import Form, UploadFile, File
+from botocore.exceptions import ClientError
+from eth_account.messages import encode_defunct
+from motor.motor_asyncio import AsyncIOMotorClient
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field, ValidationError
 from src.get_balance import get_account_balance, get_token_balance
 from src.s3_upload import upload_character_to_s3, upload_knowledge_to_s3
-from botocore.exceptions import ClientError
 
 
 
@@ -35,7 +41,7 @@ mongodb_uri = os.getenv('MONGODB_URI')
 token_address = os.getenv('TOKEN_ADDRESS')
 balance_threshold = os.getenv('BALANCE_THRESHOLD')
 
-client = MongoClient(mongodb_uri)
+client = AsyncIOMotorClient(mongodb_uri)
 db = client.users  # Replace with your database name
 
 
@@ -108,56 +114,192 @@ class ClientConfig(BaseModel):
     discord: Optional[Dict[str, str]]=None
     telegram: Optional[str]=None
 
+
+# Models
+class KnowledgeFile:
+    def __init__(self, filename: str, content: Dict, content_type: str):
+        self.filename = filename
+        self.content = content
+        self.content_type = content_type
+
+class DeploymentResponse:
+    def __init__(
+        self,
+        agent_id: str,
+        character_url: str,
+        client_config: Dict,
+        signature: str,
+        message: str,
+        knowledge_files: List[Dict]
+    ):
+        self.agent_id = agent_id
+        self.character_url = character_url
+        self.client_config = client_config
+        self.signature = signature
+        self.message = message
+        self.knowledge_files = knowledge_files
+
+    def dict(self):
+        return {
+            "agent_id": self.agent_id,
+            "character": self.character_url,
+            "client": self.client_config,
+            "signature": self.signature,
+            "message": self.message,
+            "knowledge_files": self.knowledge_files
+        }
+
+class DeploymentService:
+    def __init__(self, db):
+        self.db = db
+
+    async def verify_user(self, address: str) -> None:
+        """Verify if user exists in database"""
+        user = await self.db.users.find_one({"address": address})
+        print(user)
+        if not user:
+            logger.error(f"User {address} must register first")
+            raise HTTPException(status_code=400, detail=f"User {address} must register first")
+        logger.info(f"User {address} is registered")
+        return
+        
+
+    async def verify_character_uniqueness(self, address: str, content_hash: str) -> None:
+        """Check if character already exists"""
+        if await find_character_json(address, content_hash):
+            raise HTTPException(
+                status_code=409,
+                detail="Agent has already been deployed or deployment in process"
+            )
+
+    async def process_character_file(self, character: UploadFile) -> tuple[bytes, str]:
+        """Process and validate character file"""
+        try:
+            content = await character.read()
+            content_hash = hashlib.md5(content).hexdigest()
+            
+            try:
+                json.loads(content.decode())
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid JSON in character file")
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=400, detail="Character file must be UTF-8 encoded JSON")
+            
+            return content, content_hash
+        finally:
+            await character.close()
+
+    async def process_knowledge_file(self, file: UploadFile) -> KnowledgeFile:
+        """Process a single knowledge file"""
+        try:
+            content = await file.read()
+            
+            # Get file type using mimetypes
+            file_type, _ = mimetypes.guess_type(file.filename)
+            if not file_type:
+                file_type = 'application/octet-stream'
+            
+            json_filename = Path(file.filename).stem + '.json'
+
+            if file_type == 'application/pdf':
+                paragraphs = await extract_paragraphs_from_pdf(content)
+                file_content = {"documents": paragraphs}
+                logger.info(f"Successfully extracted {len(paragraphs)} paragraphs from {file.filename}")
+            else:
+                # For non-PDF files, store content as is
+                file_content = {"documents": [content.decode('utf-8', errors='ignore')]}                
+                logger.info(f"Processed file {file.filename} as {file_type}")
+            print (file_content)
+                
+            return KnowledgeFile(
+                filename=json_filename,
+                content=file_content,
+                content_type="application/json"
+            )
+        finally:
+            await file.close()
+
+
+    def validate_client_data(self, twitter: Optional[str], discord: Optional[str], telegram: Optional[str]) -> Dict:
+        """Validate and process client configuration data"""
+        client_data = {}
+        
+        for client_type, client_value in [
+            ("twitter", twitter),
+            ("discord", discord),
+            ("telegram", telegram)
+        ]:
+            if client_value:
+                try:
+                    if client_type != "telegram":
+                        client_data[client_type] = json.loads(client_value)
+                    else:
+                        client_data[client_type] = client_value
+                except json.JSONDecodeError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid JSON in client_{client_type}"
+                    )
+
+        try:
+            return ClientConfig(**client_data)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="Invalid client configuration")
+
+    async def verify_crypto_balance(self, address: str) -> None:
+        """Verify crypto balance meets threshold"""
+        balance = get_token_balance(address, token_address) if token_address else get_account_balance(address)
+        logger.success(f"{address} BALANCE is {balance}")
+        
+        # Uncomment and modify as needed
+        # if balance < float(balance_threshold):
+        #     raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
+
+
+
+
+
 @deploy_router.post("/deploy")
 async def deploy(
-    character: UploadFile = File(...),  # Changed to required File upload
-    signature: str = Form(None),
-    message: str = Form(None),
+    character: UploadFile = File(...),
+    signature: str = Form(...),
+    message: str = Form(...),
     knowledge_files: List[UploadFile] = File(None),
     client_twitter: Optional[str] = Form(None),
     client_discord: Optional[str] = Form(None),
     client_telegram: Optional[str] = Form(None)
-):
-    # Check required fields
-    if not character:
-        raise HTTPException(status_code=400, detail="character is required")
-    if not signature:
-        raise HTTPException(status_code=400, detail="signature is required")
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
-
-    address = verify_signature(signature, message)
-    await if_user_in_db(address)
-
-
-    print(character)
-    print(signature)
-    print(client_twitter)
+) -> Dict:
+    """
+    Deploy a new agent with character and optional knowledge files.
+    
+    Args:
+        character: Character configuration file
+        signature: Signature for verification
+        message: Message for verification
+        knowledge_files: Optional list of knowledge files
+        client_twitter: Optional Twitter client configuration
+        client_discord: Optional Discord client configuration
+        client_telegram: Optional Telegram client configuration
+    
+    Returns:
+        Dict containing deployment information
+    """
+    deployment_service = DeploymentService(db)
     agent_id = str(uuid.uuid4())
-
+    logger.info(f"agent_id = {agent_id}")
+    
     try:
-        # Parse character JSON
-        try:
-            character_content = await character.read()
-            character_content_md5_hash = hashlib.md5(character_content).hexdigest()
-            
-            character_json = json.loads(character_content.decode())
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON in character file")
-        except UnicodeDecodeError:
-            raise HTTPException(status_code=400, detail="Character file must be a valid UTF-8 encoded JSON file")
-        finally:
-            await character.close()
+        # Verify user and signature
+        address = verify_signature(signature, message)
+        logger.info(f"agent_id = {agent_id} for address {address}")
+        await deployment_service.verify_user(address)
+
+        # Process character file
+        character_content, character_hash = await deployment_service.process_character_file(character)
+        await deployment_service.verify_character_uniqueness(address, character_hash)
         
-        ##check if the same character.json exists in the database already 
-
-        
-        # Upload character.json to S3
-        if await find_character_json(address, character_content_md5_hash):
-            raise HTTPException(status_code=500, detail=f"Agent has already been deployed or deployment in process")
-
-
-        character_s3_url = await upload_character_to_s3(
+        # Upload character to S3
+        character_url = await upload_character_to_s3(
             address,
             agent_id,
             character_content,
@@ -165,101 +307,59 @@ async def deploy(
         )
 
         # Process knowledge files
-        knowledge_data = []
+        knowledge_urls = []
         if knowledge_files:
             for file in knowledge_files:
-                # Read and validate each file
-                content = await file.read()
-                logger.info(f"Uploading knowledge file {file.filename} ...")
-                try:
-                    # Try to decode as text first
-                    text_content = content.decode()
-                    knowledge_data.append({
-                        "filename": file.filename,
-                        "content": text_content,
-                        "content_type": file.content_type
-                    })
-                except UnicodeDecodeError:
-                    # If file is not text, store as binary
-                    knowledge_data.append({
-                        "filename": file.filename,
-                        "content": content,
-                        "content_type": file.content_type
-                    })
-                finally:
-                    await file.close()
+                processed_file = await deployment_service.process_knowledge_file(file)
+                
+                knowledge_url = await upload_knowledge_to_s3(
+                    address,
+                    agent_id,
+                    processed_file.content,
+                    processed_file.filename,
+                    processed_file.content_type
+                )
+                
+                knowledge_urls.append({
+                    "filename": processed_file.filename,
+                    "content_type": processed_file.content_type,
+                    "s3_url": knowledge_url
+                })
 
-        s3_url_knowledge_files = []
-        for knowledge_file_dict in knowledge_data:
-            knowledge_s3_url = await upload_knowledge_to_s3(
-                address,
-                agent_id,
-                knowledge_file_dict["content"],
-                knowledge_file_dict["filename"],
-                knowledge_file_dict["content_type"],
-            )
-            s3_url_knowledge_files.append({
-                "filename": knowledge_file_dict["filename"],
-                "content_type": knowledge_file_dict["filename"],
-                "s3_url": knowledge_s3_url})
+        # Validate client configuration
+        client_config = deployment_service.validate_client_data(
+            client_twitter,
+            client_discord,
+            client_telegram
+        )
 
+        # Verify crypto balance
+        await deployment_service.verify_crypto_balance(address)
 
-        # Parse client fields if present
-        client_data = {}
-        if client_twitter:
-            try:
-                client_data['twitter'] = json.loads(client_twitter)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid JSON in client_twitter")
-        
-        if client_discord:
-            try:
-                client_data['discord'] = json.loads(client_discord)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid JSON in client_discord")
-        
-        if client_telegram:
-            client_data['telegram'] = client_telegram
+        # Update database
+        await update_agent(
+            address,
+            agent_id,
+            character_url,
+            character_hash,
+            knowledge_urls,
+            client_config
+        )
 
-        print(client_data)
-
-        # Validate client config
-        try:
-            client = ClientConfig(**client_data)
-        except ValidationError:
-            raise HTTPException(status_code=400, detail="Invalid client configuration")
-
-        if token_address:
-            crypto_balance = get_token_balance(address, token_address)
-        else:
-            crypto_balance = get_account_balance(address)
-
-        # if crypto_balance < float(balance_threshold):
-        #     raise HTTPException(status_code=500, detail=f"This wallet doesnt have sufficient balance {crypto_balance}")
-        
-        logger.success(f"{address} BALANCE is {crypto_balance}")
-
-        # Store in MongoDB
-        await update_agent(address, agent_id, character_s3_url, character_content_md5_hash, s3_url_knowledge_files, client)
-
-        return {
-            "agent_id": agent_id,
-            "character": character_s3_url,
-            "client": client.dict(),
-            "signature": signature,
-            "message": message,
-            "knowledge_files": s3_url_knowledge_files  # Return list of processed files
-        }
+        # Return response
+        return DeploymentResponse(
+            agent_id=agent_id,
+            character_url=character_url,
+            client_config=client_config.dict(),
+            signature=signature,
+            message=message,
+            knowledge_files=knowledge_urls
+        ).dict()
 
     except Exception as e:
+        logger.error(f"Deployment failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-async def if_user_in_db(address):
-    result = db.users.find_one({"address": address})
-    if not result:
-        logger.error(f"User {address} must registered first")
-        raise HTTPException(status_code=500, detail=f"User {address} must register first")
 
 
 async def update_agent(address: str, agent_id: str, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str], client: ClientConfig):
@@ -280,9 +380,57 @@ async def update_agent(address: str, agent_id: str, character_s3_url: str, md5_h
 
 
 async def find_character_json(address: str, md5_hash: str):
-    result = db.agents.find_one({
+    result = await db.agents.find_one({
                 "address": address,
                 "character_content_md5_hash": md5_hash,
             }
         )
+    logger.info(result)
     return result
+
+async def extract_paragraphs_from_pdf(content: bytes) -> List[str]:
+    """
+    Extract text content from PDF using PyMuPDF (fitz) with decoding support
+    
+    Args:
+        content: PDF file content as bytes
+    
+    Returns:
+        List of paragraphs with cleaned text
+    """
+    try:
+        # Create stream from bytes
+        stream = io.BytesIO(content)
+        doc = fitz.open(stream=stream, filetype="pdf")
+        
+        paragraphs = []
+        
+        for page in doc:
+            # Get the blocks of text
+            blocks = page.get_text("blocks")
+            
+            for block in blocks:
+                text = block[4].strip()
+                
+                # Skip short lines and page numbers
+                if len(text) < 30 or re.match(r'^\d+$', text):
+                    continue
+                    
+                # Check if text is encoded (common patterns in the cipher text)
+                if '_' in text or text.count('r') > text.count('s'):
+                    # Skip encoded version, as we have the decoded version
+                    continue
+                
+                # Clean up text
+                text = text.replace('\n', ' ')
+                text = re.sub(r'\s+', ' ', text)
+                
+                if text:
+                    paragraphs.append(text)
+        
+        doc.close()
+        return paragraphs
+        
+    except Exception as e:
+        print(f"Error extracting PDF content: {str(e)}")
+        return []

@@ -1,11 +1,13 @@
 
 import os
 import boto3
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
 from loguru import logger
-
+from typing import Dict
+from botocore.exceptions import ClientError
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -79,7 +81,7 @@ async def upload_character_to_s3(address: str, agent_id: str, file_content: byte
         raise HTTPException(status_code=500, detail="Failed to upload file to S3")
 
 
-async def upload_knowledge_to_s3(address: str, agent_id: str, file_content: bytes, file_name: str, content_type: str = None) -> str:
+async def upload_knowledge_to_s3(address: str, agent_id: str, file_content: Dict, file_name: str, content_type: str = None) -> str:
     """
     Upload a file to S3 with timestamp metadata and return its URL
     
@@ -92,6 +94,8 @@ async def upload_knowledge_to_s3(address: str, agent_id: str, file_content: byte
         str: The S3 URL of the uploaded file
     """
     try:
+
+        content_bytes = json.dumps(file_content).encode('utf-8')
         # Generate a unique file path
         s3_path = f"{address}/{agent_id}/knowledge/{file_name}"
         
@@ -113,7 +117,7 @@ async def upload_knowledge_to_s3(address: str, agent_id: str, file_content: byte
         s3_client.put_object(
             Bucket=BUCKET_NAME,
             Key=s3_path,
-            Body=file_content,
+            Body=content_bytes,
             **extra_args
         )
         
