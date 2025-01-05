@@ -5,6 +5,7 @@ import uuid
 import json
 import magic
 import boto3
+import httpx
 import hashlib
 import mimetypes
 import fitz
@@ -112,7 +113,7 @@ const response = await fetch('/store_character_data', {
 class ClientConfig(BaseModel):
     twitter: Optional[Dict[str, str]]=None
     discord: Optional[Dict[str, str]]=None
-    telegram: Optional[str]=None
+    telegram: Optional[Dict[str, str]]=None
 
 
 # Models
@@ -162,7 +163,26 @@ class DeploymentService:
             raise HTTPException(status_code=400, detail=f"User {address} must register first")
         logger.info(f"User {address} is registered")
         return
+    
+    async def verify_agent_ownership(self, address: str, agent_id: str) -> None:
+        """Verify if user exists in database"""
         
+        agent = await self.db.agents.find_one({"agent_id": agent_id})
+        if not agent:
+            raise HTTPException(status_code=400, detail=f"Agent {agent_id} doesnt exists")
+        if address != agent["address"]:
+            raise HTTPException(status_code=400, detail=f"{address} doesnt own Agent {agent_id}")
+        logger.info(f"Agent {agent_id} with owstop{address} exists")
+        return
+
+    async def delete_agent(self, agent_id: str) -> None:
+        """Verify if user exists in database"""
+        
+        agent = await self.db.agents.delete_one({"agent_id": agent_id})
+        logger.info(f"Agent {agent_id} has been removed successfully")
+        return
+
+
 
     async def verify_character_uniqueness(self, address: str, content_hash: str) -> None:
         """Check if character already exists"""
@@ -231,10 +251,7 @@ class DeploymentService:
         ]:
             if client_value:
                 try:
-                    if client_type != "telegram":
-                        client_data[client_type] = json.loads(client_value)
-                    else:
-                        client_data[client_type] = client_value
+                   client_data[client_type] = json.loads(client_value)
                 except json.JSONDecodeError:
                     raise HTTPException(
                         status_code=400,
@@ -254,9 +271,6 @@ class DeploymentService:
         # Uncomment and modify as needed
         # if balance < float(balance_threshold):
         #     raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
-
-
-
 
 
 @deploy_router.post("/deploy")
@@ -308,6 +322,7 @@ async def deploy(
 
         # Process knowledge files
         knowledge_urls = []
+
         if knowledge_files:
             for file in knowledge_files:
                 processed_file = await deployment_service.process_knowledge_file(file)
@@ -344,6 +359,13 @@ async def deploy(
             character_hash,
             knowledge_urls,
             client_config
+        )
+
+        await notify_deployment_server(
+            agent_id=agent_id,
+            character_url=character_url,
+            knowledge_files=knowledge_urls,
+            client_config=client_config.dict()
         )
 
         # Return response
@@ -434,3 +456,164 @@ async def extract_paragraphs_from_pdf(content: bytes) -> List[str]:
     except Exception as e:
         print(f"Error extracting PDF content: {str(e)}")
         return []
+
+
+
+async def notify_deployment_server(
+    agent_id: str,
+    character_url: str,
+    knowledge_files: List[Dict],
+    client_config: Dict
+) -> None:
+    """
+    Notify the deployment server about the new agent deployment.
+    
+    Args:
+        agent_id: UUID of the deployed agent
+        character_url: S3 URL of the character file
+        knowledge_files: List of knowledge file information
+        client_config: Client configuration containing credentials
+    """
+    # Format knowledge files into expected structure
+    knowledge_dict = {
+        k["filename"]: k["s3_url"].replace("https", "s3").replace(".s3.amazonaws.com", "")
+        for k in knowledge_files
+    }
+
+    logger.info(knowledge_dict)
+    logger.info(client_config)
+    
+    # Construct environment variables from client config
+    env = {
+        "TOGETHER_MODEL_LARGE": os.getenv('TOGETHER_MODEL_LARGE'),
+        "TOGETHER_MODEL_MEDIUM": os.getenv("TOGETHER_MODEL_MEDIUM"),
+        "TOGETHER_MODEL_SMALL": os.getenv("TOGETHER_MODEL_SMALL"),
+        "TOGETHER_API_KEY": os.getenv("TOGETHER_API_KEY")
+    }
+    logger.info(env)
+
+    # Add client credentials to env if they exist
+    if client_config.get("twitter"):
+        env["TWITTER_USERNAME"] = client_config["twitter"].get("username", "")
+        env["TWITTER_PASSWORD"] = client_config["twitter"].get("password", "")
+    
+   # Add client credentials to env if they exist
+    if client_config.get("discord"):
+        env["DISCORD_APPLICATION_ID"] = client_config["discord"].get("discord_application_id", "")
+        env["DISCORD_API_TOKEN"] = client_config["discord"].get("discord_api_token", "")
+        env["DISCORD_VOICE_CHANNEL_ID"] = client_config["discord"].get("discord_voice_channel_id", "")
+
+   # Add client credentials to env if they exist
+    if client_config.get("telegram"):
+        env["TELEGRAM_BOT_TOKEN"] = client_config["telegram"].get("telegram_bot_token", "")
+
+    logger.info(env)
+    # Prepare the payload
+    payload = {
+        "id": agent_id,
+        "character": character_url.replace("https", "s3").replace(".s3.amazonaws.com", ""),
+        "knowledge": knowledge_dict,
+        "env": env
+    }
+    
+    logger.info(payload)
+    try:
+        # Get the deployment server URL from environment variables
+        deployment_server_url = os.getenv("MARLIN_SERVER_URL")
+        if not deployment_server_url:
+            logger.error("MARLIN_SERVER_URL not configured")
+            return
+            
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{deployment_server_url}/deploy",
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully notified deployment server for agent {agent_id}")
+            
+    except Exception as e:
+        logger.error(f"Failed to notify deployment server: {str(e)}")
+
+# Define request and response models
+class LogRequest(BaseModel):
+    agent_id: str
+
+class LogResponse(BaseModel):
+    success: bool
+    message: str
+    logs: str
+
+
+@deploy_router.post("/agent/logs", response_model=LogResponse)
+async def get_logs(request: LogRequest):
+    try:
+        deployment_server_url = os.getenv("MARLIN_SERVER_URL")
+        if not deployment_server_url:
+            logger.error("MARLIN_SERVER_URL not configured")
+            return
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{deployment_server_url}/logs",
+                json={"id": request.agent_id},  # Properly structured payload
+                headers={"Content-Type": "application/json"}
+            )
+            print (response.text)
+            response.raise_for_status()
+            logger.info(f"Successfully retrieved logs for id {request.agent_id}")
+            
+            return LogResponse(
+                success=True,
+                message="Logs retrieved successfully",
+                logs=response.text
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve logs: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Define request and response models
+class AgentShutdownRequest(BaseModel):
+    agent_id: str
+    signature: str
+    message: str
+
+class AgentShutdownResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@deploy_router.post("/agent/shutdown", response_model=LogResponse)
+async def shutdown_agent(request: AgentShutdownRequest):
+    deployment_service = DeploymentService(db)
+    
+    address = verify_signature(request.signature, request.message)
+    await deployment_service.verify_agent_ownership(address, request.agent_id)
+    try:
+        deployment_server_url = os.getenv("MARLIN_SERVER_URL")
+        if not deployment_server_url:
+            logger.error("MARLIN_SERVER_URL not configured")
+            return
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{deployment_server_url}/stop",
+                json={"id": request.agent_id},  # Properly structured payload
+                headers={"Content-Type": "application/json"}
+            )
+            print (response.text)
+            response.raise_for_status()
+            await deployment_service.delete_agent(request.agent_id)
+            return AgentShutdownResponse(
+                success=True,
+                message="Agent removed successfully"
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve logs: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
