@@ -126,6 +126,9 @@ async def deploy(
         raise HTTPException(status_code=400, detail="message is required")
 
     address = verify_signature(signature, message)
+    await if_user_in_db(address)
+
+
     print(character)
     print(signature)
     print(client_twitter)
@@ -226,16 +229,7 @@ async def deploy(
         logger.success(f"{address} BALANCE is {crypto_balance}")
 
         # Store in MongoDB
-        result = db.users.update_one(
-            {"address": address},
-            {"$set": {
-                "agent_id": agent_id,
-                "character": character_s3_url,
-                "client": client.dict(),
-                "knowledge": s3_url_knowledge_files # Add knowledge data to storage
-            }},
-            upsert=True
-        )
+        await update_agent(address, agent_id, character_s3_url, s3_url_knowledge_files, client)
 
         return {
             "agent_id": agent_id,
@@ -248,3 +242,26 @@ async def deploy(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def if_user_in_db(address):
+    result = db.users.find_one({"address": address})
+    if not result:
+        logger.error(f"User {address} must registered first")
+        raise HTTPException(status_code=500, detail=f"User {address} must register first")
+
+
+async def update_agent(address: str, agent_id: str, character_s3_url: str, s3_url_knowledge_files: List[str], client: ClientConfig):
+    result = db.agents.update_one(
+            {"agent_id": agent_id},
+            {"$set": {
+                "created_at": datetime.utcnow(),
+                "version": "v1",
+                "address": address,
+                "character": character_s3_url,
+                "client": client.dict(),
+                "knowledge": s3_url_knowledge_files # Add knowledge data to storage
+            }},
+            upsert=True
+        )
+    return
