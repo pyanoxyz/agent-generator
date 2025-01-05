@@ -49,6 +49,7 @@ The character's display name for identification and in conversations.
 Example:
 "name": "Tony boxer"
 
+
 modelProvider (required)
 Specifies the AI model provider. Supported options: openai eternalai anthropic grok groq llama_cloud together llama_local google claude_vertex redpill openrouter ollama heurist galadriel falai gaianet ali_bailian volengine nanogpt hyperbolic venice akash_chat_api
 Example:
@@ -59,6 +60,11 @@ Array of supported client types: discord direct twitter telegram farcaster lens 
 Example:
 "clients": ["discord", "twitter"],
 
+plugins (required)
+Array of plugins to be used with the character. Can be empty if no plugins are needed.
+Example:
+"plugins": [],
+    
 bio
 Character background as a string or array of statements (string).
 Contains biographical information about the character
