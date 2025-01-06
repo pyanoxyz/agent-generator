@@ -187,6 +187,7 @@ async def deploy(
             address,
             agent_id,
             json_content,
+            client_config,
             character_url,
             character_hash,
             knowledge_urls
@@ -216,22 +217,32 @@ async def deploy(
         logger.error(f"Deployment failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Define request and response models
+class AgentStartRequest(BaseModel):
+    agent_id: str
+    signature: str
+    message: str
+
 @deploy_router.post("/agent/start")
-async def start_agent(
-    agent_id: str, 
-    signature: str,
-    message: str,
-    client_configs: dict
-):   
+async def start_agent(request: AgentStartRequest):   
     agent_service = AgentService(db)
     deployment_service = DeploymentService(db)
     
-    address = verify_signature(signature, message)
-    await agent_service.verify_agent_ownership(address, agent_id)
+    address = verify_signature(request.signature, request.message)
+    await agent_service.verify_agent_ownership(address, request.agent_id)
     await deployment_service.verify_crypto_balance(address)
     
     try:
-        return agent_service.start_agent(address, message, signature, agent_id, client_configs)
+        character_url, knowledge_urls = await agent_service.start_agent(request.agent_id)
+         # Return response
+        return DeploymentResponse(
+            agent_id=request.agent_id,
+            character_url=character_url,
+            signature=request.signature,
+            message=request.message,
+            knowledge_files=knowledge_urls
+        ).dict()
+
     except HTTPException as he:
         # Re-raise existing HTTP exceptions
         raise he
@@ -240,7 +251,7 @@ async def start_agent(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-async def update_agent(address: str, agent_id: str, json_content: Any, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str]):
+async def update_agent(address: str, agent_id: str, json_content: Any, client_config: ClientConfig, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str]):
     result = db.agents.update_one(
             {"agent_id": agent_id},
             {"$set": {
@@ -249,6 +260,7 @@ async def update_agent(address: str, agent_id: str, json_content: Any, character
                 "version": "v1",
                 "bio": json_content["bio"],
                 "address": address,
+                "client_config": client_config.dict(),
                 "character_s3_url": character_s3_url,
                 "character_content_md5_hash": md5_hash,                
                 "knowledge": s3_url_knowledge_files,
