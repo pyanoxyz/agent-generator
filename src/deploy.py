@@ -140,7 +140,7 @@ async def deploy(
         await deployment_service.verify_user(address)
 
         # Process character file
-        character_content, character_hash, agent_bio = await deployment_service.process_character_file(character)
+        character_content, character_hash, json_content = await deployment_service.process_character_file(character)
         await deployment_service.verify_character_uniqueness(address, character_hash)
         
         # Upload character to S3
@@ -186,11 +186,10 @@ async def deploy(
         await update_agent(
             address,
             agent_id,
-            agent_bio,
+            json_content,
             character_url,
             character_hash,
-            knowledge_urls,
-            client_config
+            knowledge_urls
         )
 
         await notify_deployment_server(
@@ -204,11 +203,14 @@ async def deploy(
         return DeploymentResponse(
             agent_id=agent_id,
             character_url=character_url,
-            client_config=client_config.dict(),
             signature=signature,
             message=message,
             knowledge_files=knowledge_urls
         ).dict()
+        
+    except HTTPException as he:
+        # Re-raise existing HTTP exceptions
+        raise he
 
     except Exception as e:
         logger.error(f"Deployment failed: {str(e)}")
@@ -216,17 +218,17 @@ async def deploy(
 
 
 
-async def update_agent(address: str, agent_id: str, bio: List[str], character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str], client: ClientConfig):
+async def update_agent(address: str, agent_id: str, json_content: Any, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str]):
     result = db.agents.update_one(
             {"agent_id": agent_id},
             {"$set": {
                 "created_at": datetime.utcnow(),
+                "character": json_content,
                 "version": "v1",
-                "bio": bio,
+                "bio": json_content["bio"],
                 "address": address,
-                "character": character_s3_url,
-                "character_content_md5_hash": md5_hash,
-                "client": client.dict(),
+                "character_s3_url": character_s3_url,
+                "character_content_md5_hash": md5_hash,                
                 "knowledge": s3_url_knowledge_files,
                 "status": AgentStatus.RUNNING.value
             }},
@@ -373,7 +375,7 @@ class AgentShutdownResponse(BaseModel):
     message: str
 
 
-@deploy_router.post("/agent/shutdown", response_model=LogResponse)
+@deploy_router.post("/agent/shutdown", response_model=AgentShutdownResponse)
 async def shutdown_agent(request: AgentShutdownRequest):
     agent_service = AgentService(db)
     
@@ -390,6 +392,7 @@ async def shutdown_agent(request: AgentShutdownRequest):
                 json={"id": request.agent_id},  # Properly structured payload
                 headers={"Content-Type": "application/json"}
             )
+            print(response.status_code)
             response.raise_for_status()
             await agent_service.stop_agent(request.agent_id)
             return AgentShutdownResponse(
@@ -400,9 +403,6 @@ async def shutdown_agent(request: AgentShutdownRequest):
     except HTTPException as he:
         # Re-raise existing HTTP exceptions
         raise he
-    except httpx.HTTPError as e:
-        logger.error(f"HTTP error occurred: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Failed to Shutdown agent: {str(e)}")
     except Exception as e:
         logger.error(f"Unexpected error occurred: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))

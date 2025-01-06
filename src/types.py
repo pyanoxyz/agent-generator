@@ -7,7 +7,7 @@ class AgentStatus(Enum):
 
 class TwitterCredentials(BaseModel):
     username: str = Field(..., min_length=1)
-    password: str = Field(..., min_length=5)
+    password: str = Field(..., min_length=3)
     email: EmailStr
 
 class DiscordCredentials(BaseModel):
@@ -41,14 +41,12 @@ class DeploymentResponse:
         self,
         agent_id: str,
         character_url: str,
-        client_config: Dict,
         signature: str,
         message: str,
         knowledge_files: List[Dict]
     ):
         self.agent_id = agent_id
         self.character_url = character_url
-        self.client_config = client_config
         self.signature = signature
         self.message = message
         self.knowledge_files = knowledge_files
@@ -57,7 +55,6 @@ class DeploymentResponse:
         return {
             "agent_id": self.agent_id,
             "character": self.character_url,
-            "client": self.client_config,
             "signature": self.signature,
             "message": self.message,
             "knowledge_files": self.knowledge_files

@@ -73,7 +73,7 @@ class DeploymentService:
                 if not isinstance(json_content['bio'], list):
                     raise HTTPException(status_code=400, detail="'bio' field must be a list")
                 
-                return content, content_hash, json_content['bio']
+                return content, content_hash, json_content
 
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Invalid JSON in character file")
@@ -87,7 +87,8 @@ class DeploymentService:
         """Process a single knowledge file"""
         try:
             content = await file.read()
-            
+            if not content:
+                raise HTTPException(status_code=400, detail="File content is empty")            
             # Get file type using mimetypes
             file_type, _ = mimetypes.guess_type(file.filename)
             if not file_type:
@@ -104,6 +105,7 @@ class DeploymentService:
                 file_content = {"documents": [content.decode('utf-8', errors='ignore')]}                
                 logger.info(f"Processed file {file.filename} as {file_type}")
             print (file_content)
+
                 
             return KnowledgeFile(
                 filename=json_filename,
@@ -116,7 +118,11 @@ class DeploymentService:
 
     def validate_client_data(self, twitter: Optional[str], discord: Optional[str], telegram: Optional[str]) -> Dict:
         """Validate and process client configuration data"""
-        client_data = {}
+        client_data = {
+            "twitter": None,
+            "discord": None,
+            "telegram": None
+        }
         
         for client_type, client_value in [
             ("twitter", twitter),
@@ -146,7 +152,8 @@ class DeploymentService:
 
         try:
             return ClientConfig(**client_data)
-        except ValidationError:
+        except ValidationError as e:
+            logger.error(f"Error in validating client {str(e)}")
             raise HTTPException(status_code=400, detail="Invalid client configuration")
 
     async def verify_crypto_balance(self, address: str) -> None:
