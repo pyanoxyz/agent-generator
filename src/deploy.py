@@ -7,8 +7,6 @@ import magic
 import boto3
 import fitz
 import httpx
-import hashlib
-import mimetypes
 from PIL import Image
 from enum import Enum
 from web3 import Web3
@@ -23,10 +21,11 @@ from typing import Optional, Dict, Any, List
 from eth_account.messages import encode_defunct
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import APIRouter, HTTPException, Depends
-from src.get_balance import get_account_balance, get_token_balance
 from src.s3_upload import upload_character_to_s3, upload_knowledge_to_s3
 from pydantic import BaseModel, Field, ValidationError, validator, EmailStr
-
+from src.deployment_service import DeploymentService
+from src.agent_service import AgentService
+from src.types import KnowledgeFile, TwitterCredentials, DiscordCredentials, TelegramCredentials, ClientConfig, SignatureRequest, AgentStatus, DeploymentResponse
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -43,28 +42,6 @@ balance_threshold = os.getenv('BALANCE_THRESHOLD')
 
 client = AsyncIOMotorClient(mongodb_uri)
 db = client.users  # Replace with your database name
-
-class AgentStatus(Enum):
-    RUNNING = "running"
-    STOPPED = "stopped"
-
-class TwitterCredentials(BaseModel):
-    username: str = Field(..., min_length=1)
-    password: str = Field(..., min_length=5)
-    email: EmailStr
-
-class DiscordCredentials(BaseModel):
-    discord_application_id: str = Field(..., min_length=1)
-    discord_api_token: str = Field(..., min_length=1)
-    discord_voice_channel_id: Optional[str] = None
-
-class TelegramCredentials(BaseModel):
-    telegram_bot_token: str = Field(..., min_length=1)
-
-
-class SignatureRequest(BaseModel):
-    signature: str = Field(..., description="Signature is required")
-    message: str = Field(..., description="Message is required")
 
 
 
@@ -126,211 +103,8 @@ const response = await fetch('/store_character_data', {
 });
 
 """
-# Update the ClientConfig to use DiscordCredentials
-class ClientConfig(BaseModel):
-    twitter: Optional[TwitterCredentials]
-    discord: Optional[DiscordCredentials]
-    telegram: Optional[TelegramCredentials]
 
-# Models
-class KnowledgeFile:
-    def __init__(self, filename: str, content: Dict, content_type: str):
-        self.filename = filename
-        self.content = content
-        self.content_type = content_type
-
-class DeploymentResponse:
-    def __init__(
-        self,
-        agent_id: str,
-        character_url: str,
-        client_config: Dict,
-        signature: str,
-        message: str,
-        knowledge_files: List[Dict]
-    ):
-        self.agent_id = agent_id
-        self.character_url = character_url
-        self.client_config = client_config
-        self.signature = signature
-        self.message = message
-        self.knowledge_files = knowledge_files
-
-    def dict(self):
-        return {
-            "agent_id": self.agent_id,
-            "character": self.character_url,
-            "client": self.client_config,
-            "signature": self.signature,
-            "message": self.message,
-            "knowledge_files": self.knowledge_files
-        }
-
-class DeploymentService:
-    def __init__(self, db):
-        self.db = db
-
-    async def verify_user(self, address: str) -> None:
-        """Verify if user exists in database"""
-        user = await self.db.users.find_one({"address": address})
-        print(user)
-        if not user:
-            logger.error(f"User {address} must register first")
-            raise HTTPException(status_code=400, detail=f"User {address} must register first")
-        logger.info(f"User {address} is registered")
-        return
-    
-
-    async def verify_character_uniqueness(self, address: str, content_hash: str) -> None:
-        """Check if character already exists"""
-        if await find_character_json(address, content_hash):
-            raise HTTPException(
-                status_code=409,
-                detail="Agent has already been deployed or deployment in process"
-            )
-
-    async def process_character_file(self, character: UploadFile) -> tuple[bytes, str]:
-        """Process and validate character file"""
-        try:
-            content = await character.read()
-            content_hash = hashlib.md5(content).hexdigest()
-            
-            try:
-                json_content = json.loads(content.decode())
-                if 'bio' not in json_content:
-                    raise HTTPException(status_code=400, detail="Missing 'bio' field in character file")
-                
-                if not isinstance(json_content['bio'], list):
-                    raise HTTPException(status_code=400, detail="'bio' field must be a list")
-                
-                return content, content_hash, json_content['bio']
-
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid JSON in character file")
-            except UnicodeDecodeError:
-                raise HTTPException(status_code=400, detail="Character file must be UTF-8 encoded JSON")
-            
-        finally:
-            await character.close()
-
-    async def process_knowledge_file(self, file: UploadFile) -> KnowledgeFile:
-        """Process a single knowledge file"""
-        try:
-            content = await file.read()
-            
-            # Get file type using mimetypes
-            file_type, _ = mimetypes.guess_type(file.filename)
-            if not file_type:
-                file_type = 'application/octet-stream'
-            
-            json_filename = Path(file.filename).stem + '.json'
-
-            if file_type == 'application/pdf':
-                paragraphs = await extract_paragraphs_from_pdf(content)
-                file_content = {"documents": paragraphs}
-                logger.info(f"Successfully extracted {len(paragraphs)} paragraphs from {file.filename}")
-            else:
-                # For non-PDF files, store content as is
-                file_content = {"documents": [content.decode('utf-8', errors='ignore')]}                
-                logger.info(f"Processed file {file.filename} as {file_type}")
-            print (file_content)
-                
-            return KnowledgeFile(
-                filename=json_filename,
-                content=file_content,
-                content_type="application/json"
-            )
-        finally:
-            await file.close()
-
-
-    def validate_client_data(self, twitter: Optional[str], discord: Optional[str], telegram: Optional[str]) -> Dict:
-        """Validate and process client configuration data"""
-        client_data = {}
-        
-        for client_type, client_value in [
-            ("twitter", twitter),
-            ("discord", discord),
-            ("telegram", telegram)
-        ]:
-            if client_value:
-                try:
-                    parsed_value = json.loads(client_value)
-                
-                    if client_type == "twitter":
-                        client_data[client_type] = TwitterCredentials(**parsed_value)
-                    elif client_type == "discord":
-                        client_data[client_type] = DiscordCredentials(**parsed_value)
-                    elif client_type == "telegram":
-                        client_data[client_type] = TelegramCredentials(**parsed_value)
-                    else:
-                        raise HTTPException(
-                        status_code=400,
-                        detail=f"Client not supported yet"
-                        )                    
-                except json.JSONDecodeError:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid JSON in client_{client_type}"
-                    )
-
-        try:
-            return ClientConfig(**client_data)
-        except ValidationError:
-            raise HTTPException(status_code=400, detail="Invalid client configuration")
-
-    async def verify_crypto_balance(self, address: str) -> None:
-        """Verify crypto balance meets threshold"""
-        balance = get_token_balance(address, token_address) if token_address else get_account_balance(address)
-        logger.success(f"{address} BALANCE is {balance}")
-        
-        # Uncomment and modify as needed
-        # if balance < float(balance_threshold):
-        #     raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
-
-
-
-
-class AgentService:
-    def __init__(self, db):
-        self.db = db
-        
-    async def get_agents(self, address: str) -> None:
-        """Verify if user exists in database"""
-        cursor = self.db.agents.find({"address": address}, {"_id": 0, "character_content_md5_hash": 0, "client": 0})
-        agents = []
-        
-        async for agent in cursor:
-            agents.append(agent)
-            
-        if not agents:
-            logger.error(f"User {address} must register first")
-            raise HTTPException(status_code=400, detail=f"User {address} must register first")
-            
-        logger.info(f"Found {len(agents)} agents for address {address}")
-        return agents
-
-    async def verify_agent_ownership(self, address: str, agent_id: str) -> None:
-        """Verify if user exists in database"""
-        
-        agent = await self.db.agents.find_one({"agent_id": agent_id})
-        if not agent:
-            raise HTTPException(status_code=400, detail=f"Agent {agent_id} doesnt exists")
-        if address != agent["address"]:
-            raise HTTPException(status_code=400, detail=f"{address} doesnt own Agent {agent_id}")
-        logger.info(f"Agent {agent_id} with owstop{address} exists")
-        return
-
-    async def stop_agent(self, agent_id: str) -> None:
-        """Verify if user exists in database"""
-        
-        agent = await self.db.agents.update_one({"agent_id": agent_id}, {"$set": {"status": AgentStatus.STOPPED}}, upsert=False)
-        logger.info(f"Agent {agent_id} has been removed successfully")
-        return
-
-
-
-@deploy_router.post("/agents/deploy")
+@deploy_router.post("/agent/deploy")
 async def deploy(
     character: UploadFile = File(...),
     signature: str = Form(...),
@@ -461,61 +235,7 @@ async def update_agent(address: str, agent_id: str, bio: List[str], character_s3
     return
 
 
-async def find_character_json(address: str, md5_hash: str):
-    result = await db.agents.find_one({
-                "address": address,
-                "character_content_md5_hash": md5_hash,
-            }
-        )
-    logger.info(result)
-    return result
 
-async def extract_paragraphs_from_pdf(content: bytes) -> List[str]:
-    """
-    Extract text content from PDF using PyMuPDF (fitz) with decoding support
-    
-    Args:
-        content: PDF file content as bytes
-    
-    Returns:
-        List of paragraphs with cleaned text
-    """
-    try:
-        # Create stream from bytes
-        stream = io.BytesIO(content)
-        doc = fitz.open(stream=stream, filetype="pdf")
-        
-        paragraphs = []
-        
-        for page in doc:
-            # Get the blocks of text
-            blocks = page.get_text("blocks")
-            
-            for block in blocks:
-                text = block[4].strip()
-                
-                # Skip short lines and page numbers
-                if len(text) < 30 or re.match(r'^\d+$', text):
-                    continue
-                    
-                # Check if text is encoded (common patterns in the cipher text)
-                if '_' in text or text.count('r') > text.count('s'):
-                    # Skip encoded version, as we have the decoded version
-                    continue
-                
-                # Clean up text
-                text = text.replace('\n', ' ')
-                text = re.sub(r'\s+', ' ', text)
-                
-                if text:
-                    paragraphs.append(text)
-        
-        doc.close()
-        return paragraphs
-        
-    except Exception as e:
-        print(f"Error extracting PDF content: {str(e)}")
-        return []
 
 
 
@@ -679,10 +399,6 @@ async def shutdown_agent(request: AgentShutdownRequest):
     except Exception as e:
         logger.error(f"Unexpected error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
 
 
 # Define request and response models

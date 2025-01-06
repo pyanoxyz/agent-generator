@@ -8,7 +8,7 @@ def deploy_character(
     client_telegram: dict = None
 ):
     import mimetypes
-    url = "http://localhost:8000/api/v1/agents/deploy"
+    url = "http://localhost:8000/api/v1/agent/deploy"
 
     # Initialize files with character file
     files = []

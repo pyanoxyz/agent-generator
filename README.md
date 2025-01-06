@@ -5,7 +5,7 @@ refer to tests/test_deploy_agent.py file
 
 #### How to get the logs of a running agent
 ```
-r = requests.post("http://localhost:8000/api/v1/logs", json={"agent_id": "b0790868-6d47-46db-9c7e-fa1e2f7dd51"})
+r = requests.post("http://localhost:8000/api/v1/agent/logs", json={"agent_id": "b0790868-6d47-46db-9c7e-fa1e2f7dd51"})
 ```
 
 #### How to shutdown a running agent
