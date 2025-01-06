@@ -5,28 +5,27 @@ import uuid
 import json
 import magic
 import boto3
+import fitz
 import httpx
 import hashlib
 import mimetypes
-import fitz
 from PIL import Image
+from enum import Enum
 from web3 import Web3
 from web3.auto import w3
 from loguru import logger
 from pathlib import Path
 from  datetime import datetime
 from dotenv import load_dotenv
-from typing import List, Optional
-from typing import Optional, Dict
 from fastapi import Form, UploadFile, File
 from botocore.exceptions import ClientError
+from typing import Optional, Dict, Any, List
 from eth_account.messages import encode_defunct
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field, ValidationError
 from src.get_balance import get_account_balance, get_token_balance
 from src.s3_upload import upload_character_to_s3, upload_knowledge_to_s3
-
+from pydantic import BaseModel, Field, ValidationError, validator, EmailStr
 
 
 # Get the parent directory of the current file (src/)
@@ -44,6 +43,23 @@ balance_threshold = os.getenv('BALANCE_THRESHOLD')
 
 client = AsyncIOMotorClient(mongodb_uri)
 db = client.users  # Replace with your database name
+
+class AgentStatus(Enum):
+    RUNNING = "running"
+    STOPPED = "stopped"
+
+class TwitterCredentials(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=5)
+    email: EmailStr
+
+class DiscordCredentials(BaseModel):
+    discord_application_id: str = Field(..., min_length=1)
+    discord_api_token: str = Field(..., min_length=1)
+    discord_voice_channel_id: Optional[str] = None
+
+class TelegramCredentials(BaseModel):
+    telegram_bot_token: str = Field(..., min_length=1)
 
 
 class SignatureRequest(BaseModel):
@@ -110,11 +126,11 @@ const response = await fetch('/store_character_data', {
 });
 
 """
+# Update the ClientConfig to use DiscordCredentials
 class ClientConfig(BaseModel):
-    twitter: Optional[Dict[str, str]]=None
-    discord: Optional[Dict[str, str]]=None
-    telegram: Optional[Dict[str, str]]=None
-
+    twitter: Optional[TwitterCredentials]
+    discord: Optional[DiscordCredentials]
+    telegram: Optional[TelegramCredentials]
 
 # Models
 class KnowledgeFile:
@@ -164,25 +180,6 @@ class DeploymentService:
         logger.info(f"User {address} is registered")
         return
     
-    async def verify_agent_ownership(self, address: str, agent_id: str) -> None:
-        """Verify if user exists in database"""
-        
-        agent = await self.db.agents.find_one({"agent_id": agent_id})
-        if not agent:
-            raise HTTPException(status_code=400, detail=f"Agent {agent_id} doesnt exists")
-        if address != agent["address"]:
-            raise HTTPException(status_code=400, detail=f"{address} doesnt own Agent {agent_id}")
-        logger.info(f"Agent {agent_id} with owstop{address} exists")
-        return
-
-    async def delete_agent(self, agent_id: str) -> None:
-        """Verify if user exists in database"""
-        
-        agent = await self.db.agents.delete_one({"agent_id": agent_id})
-        logger.info(f"Agent {agent_id} has been removed successfully")
-        return
-
-
 
     async def verify_character_uniqueness(self, address: str, content_hash: str) -> None:
         """Check if character already exists"""
@@ -199,13 +196,20 @@ class DeploymentService:
             content_hash = hashlib.md5(content).hexdigest()
             
             try:
-                json.loads(content.decode())
+                json_content = json.loads(content.decode())
+                if 'bio' not in json_content:
+                    raise HTTPException(status_code=400, detail="Missing 'bio' field in character file")
+                
+                if not isinstance(json_content['bio'], list):
+                    raise HTTPException(status_code=400, detail="'bio' field must be a list")
+                
+                return content, content_hash, json_content['bio']
+
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Invalid JSON in character file")
             except UnicodeDecodeError:
                 raise HTTPException(status_code=400, detail="Character file must be UTF-8 encoded JSON")
             
-            return content, content_hash
         finally:
             await character.close()
 
@@ -251,7 +255,19 @@ class DeploymentService:
         ]:
             if client_value:
                 try:
-                   client_data[client_type] = json.loads(client_value)
+                    parsed_value = json.loads(client_value)
+                
+                    if client_type == "twitter":
+                        client_data[client_type] = TwitterCredentials(**parsed_value)
+                    elif client_type == "discord":
+                        client_data[client_type] = DiscordCredentials(**parsed_value)
+                    elif client_type == "telegram":
+                        client_data[client_type] = TelegramCredentials(**parsed_value)
+                    else:
+                        raise HTTPException(
+                        status_code=400,
+                        detail=f"Client not supported yet"
+                        )                    
                 except json.JSONDecodeError:
                     raise HTTPException(
                         status_code=400,
@@ -273,7 +289,48 @@ class DeploymentService:
         #     raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
 
 
-@deploy_router.post("/deploy")
+
+
+class AgentService:
+    def __init__(self, db):
+        self.db = db
+        
+    async def get_agents(self, address: str) -> None:
+        """Verify if user exists in database"""
+        cursor = self.db.agents.find({"address": address}, {"_id": 0, "character_content_md5_hash": 0, "client": 0})
+        agents = []
+        
+        async for agent in cursor:
+            agents.append(agent)
+            
+        if not agents:
+            logger.error(f"User {address} must register first")
+            raise HTTPException(status_code=400, detail=f"User {address} must register first")
+            
+        logger.info(f"Found {len(agents)} agents for address {address}")
+        return agents
+
+    async def verify_agent_ownership(self, address: str, agent_id: str) -> None:
+        """Verify if user exists in database"""
+        
+        agent = await self.db.agents.find_one({"agent_id": agent_id})
+        if not agent:
+            raise HTTPException(status_code=400, detail=f"Agent {agent_id} doesnt exists")
+        if address != agent["address"]:
+            raise HTTPException(status_code=400, detail=f"{address} doesnt own Agent {agent_id}")
+        logger.info(f"Agent {agent_id} with owstop{address} exists")
+        return
+
+    async def stop_agent(self, agent_id: str) -> None:
+        """Verify if user exists in database"""
+        
+        agent = await self.db.agents.update_one({"agent_id": agent_id}, {"$set": {"status": AgentStatus.STOPPED}}, upsert=False)
+        logger.info(f"Agent {agent_id} has been removed successfully")
+        return
+
+
+
+@deploy_router.post("/agents/deploy")
 async def deploy(
     character: UploadFile = File(...),
     signature: str = Form(...),
@@ -309,7 +366,7 @@ async def deploy(
         await deployment_service.verify_user(address)
 
         # Process character file
-        character_content, character_hash = await deployment_service.process_character_file(character)
+        character_content, character_hash, agent_bio = await deployment_service.process_character_file(character)
         await deployment_service.verify_character_uniqueness(address, character_hash)
         
         # Upload character to S3
@@ -355,6 +412,7 @@ async def deploy(
         await update_agent(
             address,
             agent_id,
+            agent_bio,
             character_url,
             character_hash,
             knowledge_urls,
@@ -384,17 +442,19 @@ async def deploy(
 
 
 
-async def update_agent(address: str, agent_id: str, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str], client: ClientConfig):
+async def update_agent(address: str, agent_id: str, bio: List[str], character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str], client: ClientConfig):
     result = db.agents.update_one(
             {"agent_id": agent_id},
             {"$set": {
                 "created_at": datetime.utcnow(),
                 "version": "v1",
+                "bio": bio,
                 "address": address,
                 "character": character_s3_url,
                 "character_content_md5_hash": md5_hash,
                 "client": client.dict(),
-                "knowledge": s3_url_knowledge_files # Add knowledge data to storage
+                "knowledge": s3_url_knowledge_files,
+                "status": AgentStatus.RUNNING.value
             }},
             upsert=True
         )
@@ -488,7 +548,8 @@ async def notify_deployment_server(
         "TOGETHER_MODEL_LARGE": os.getenv('TOGETHER_MODEL_LARGE'),
         "TOGETHER_MODEL_MEDIUM": os.getenv("TOGETHER_MODEL_MEDIUM"),
         "TOGETHER_MODEL_SMALL": os.getenv("TOGETHER_MODEL_SMALL"),
-        "TOGETHER_API_KEY": os.getenv("TOGETHER_API_KEY")
+        "TOGETHER_API_KEY": os.getenv("TOGETHER_API_KEY"),
+        "USE_TOGETHER_EMBEDDING": "true"
     }
     logger.info(env)
 
@@ -501,7 +562,8 @@ async def notify_deployment_server(
     if client_config.get("discord"):
         env["DISCORD_APPLICATION_ID"] = client_config["discord"].get("discord_application_id", "")
         env["DISCORD_API_TOKEN"] = client_config["discord"].get("discord_api_token", "")
-        env["DISCORD_VOICE_CHANNEL_ID"] = client_config["discord"].get("discord_voice_channel_id", "")
+        if client_config["discord"].get("discord_voice_channel_id"):
+            env["DISCORD_VOICE_CHANNEL_ID"] = client_config["discord"].get("discord_voice_channel_id")
 
    # Add client credentials to env if they exist
     if client_config.get("telegram"):
@@ -589,10 +651,10 @@ class AgentShutdownResponse(BaseModel):
 
 @deploy_router.post("/agent/shutdown", response_model=LogResponse)
 async def shutdown_agent(request: AgentShutdownRequest):
-    deployment_service = DeploymentService(db)
+    agent_service = AgentService(db)
     
     address = verify_signature(request.signature, request.message)
-    await deployment_service.verify_agent_ownership(address, request.agent_id)
+    await agent_service.verify_agent_ownership(address, request.agent_id)
     try:
         deployment_server_url = os.getenv("MARLIN_SERVER_URL")
         if not deployment_server_url:
@@ -606,7 +668,7 @@ async def shutdown_agent(request: AgentShutdownRequest):
             )
             print (response.text)
             response.raise_for_status()
-            await deployment_service.delete_agent(request.agent_id)
+            await agent_service.stop_agent(request.agent_id)
             return AgentShutdownResponse(
                 success=True,
                 message="Agent removed successfully"
@@ -617,3 +679,35 @@ async def shutdown_agent(request: AgentShutdownRequest):
     except Exception as e:
         logger.error(f"Unexpected error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+
+# Define request and response models
+class GetAgentsRequest(BaseModel):
+    address: str
+
+# Define request and response models
+class GetAgentsResponse(BaseModel):
+    address: str
+    agents: List[Dict[str, Any]]  # This will accept any object structure
+
+
+@deploy_router.post("/agent/all", response_model=GetAgentsResponse)
+async def get_agents(request: GetAgentsRequest):
+    try:
+        agent_service = AgentService(db)
+        agents = await agent_service.get_agents(request.address)
+        return GetAgentsResponse(
+            address=request.address,
+            agents=agents
+        )
+        
+    except Exception as e:
+        logger.error(f"Error retrieving agents: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to retrieve agents: {str(e)}"
+        )

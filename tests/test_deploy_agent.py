@@ -8,7 +8,7 @@ def deploy_character(
     client_telegram: dict = None
 ):
     import mimetypes
-    url = "http://localhost:8000/api/v1/deploy"
+    url = "http://localhost:8000/api/v1/agents/deploy"
 
     # Initialize files with character file
     files = []
@@ -40,21 +40,27 @@ def deploy_character(
     if client_telegram:
         form_data['client_telegram'] = json.dumps(client_telegram)
 
-    try:
-        response = requests.post(url, files=files, data=form_data)
-        return response.json()
-    finally:
-        # Close all opened files
-        for _, file_data, _ in files:
-            if hasattr(file_data[1], 'close'):
-                file_data[1].close()
+    response = requests.post(url, files=files, data=form_data)
+    return response.json()
+
 
 knowledge_files = [ "/Users/sauravverma/programs/pyano/agent-execution-runtime/src/main.rs", 
                 "/Users/sauravverma/programs/pyano/mistral.rs/mistralrs-server/src/interactive_mode.rs" ]
 character_file = "/Users/sauravverma/programs/pyano/agent-generator/characters/nelson_mandela.json"
-twitter_config = {"username": "example_twitter"}
-discord_config = {"server_id": "123456"}
-telegram_id = {"telegram_bot_token" : "telegram_bot_token" }
-message = "We will make it, trust god"
-signature="9a69e6bcf98a5e40ae00cf1c8a2c5ebf1c016d0272b3c57be5e133d59dbc199e28a126b07e5425c8755dd5d3c1123a0f7534455298207a1e67e7547a2ec192a51c"
-address="0xe1B062c501ae3ad69cd40703A4a82aC6B1B36C0A" 
+twitter_config = {"username": "example_twitter", "password": "password", "email": "test@gmail.com"}
+discord_config = {"discord_application_id": "123456", "discord_api_token": "sewerwerwr"}
+telegram_id = {"telegram_bot_token": "telegram_bot_token"}
+message = "Welcome to pyano network, Sign this message for server authentication"
+signature="8fbbf5b11fc4c75407def62092bd57cd21b7e9da3918d6bd0e6c72573a532b83043bcafdd1b32901d16e4a669065053fc943ffd8369115bd75a9fb621a145a831c"
+address="0xe1B062c501ae3ad69cd40703A4a82aC6B1B36C0A"
+
+result = deploy_character(
+        character_file,
+        knowledge_files,
+        signature,
+        message,
+        client_twitter=twitter_config,
+        client_discord=discord_config,
+        client_telegram=telegram_config
+    )
+
