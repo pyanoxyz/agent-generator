@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
 import json
+import sys
 # from langchain_huggingface import HuggingFaceEmbeddings
 # from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -225,7 +226,18 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
 
-if __name__ == "__main__":
-    import uvicorn
-    
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+env = os.getenv("ENV")
+logger.info(f"Env is {env}")
+
+if env not in ["production", "local"]:    
+    logger.error("env can either be production or local, please edit the .env file")
+    sys.exit(1)
+
+# if __name__ == "__main__":
+#     import uvicorn
+#     env = os.getenv("ENV")
+#     if not env == "production" or not env == "local":
+#         logger.error("env can either be production or local, please edit the .env file")
+#         sys.exit(1)
+#     logger.info(f"Env is {env}")
+#     uvicorn.run(app, host="0.0.0.0", port=8000)

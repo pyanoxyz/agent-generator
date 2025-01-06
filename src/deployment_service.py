@@ -25,6 +25,7 @@ load_dotenv(root_dir / '.env')
 
 # Initialize MongoDB client
 token_address = os.getenv('TOKEN_ADDRESS')
+env = os.getenv('ENV')
 
 
 
@@ -163,8 +164,9 @@ class DeploymentService:
         logger.success(f"{address} BALANCE is {balance}")
         
         # Uncomment and modify as needed
-        # if balance < float(balance_threshold):
-        #     raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
+        if env == "production":
+            if balance < float(balance_threshold):
+                raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
 
 
 async def notify_deployment_server(
