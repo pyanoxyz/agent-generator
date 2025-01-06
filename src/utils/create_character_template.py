@@ -131,6 +131,7 @@ Topics Array
 List of subjects the character is interested in or knowledgeable about
 Used to guide conversations and generate relevant content
 Helps maintain character consistency
+Add atleast 10 topics
 Example:
 "topics": [
     "artificial intelligence",
@@ -347,6 +348,7 @@ C3po :
 Now your task is to understand the user query and requirements and curate a character.json specific to the user query.
 Give atleast 5 post examples.
 Use modelProvider, clients based on the prompt, if they are not in prompt use openai and twitter default respectively. 
+Required keys: name, plugins, bio, lore, messageExamples, postExamples, topics, adjectives, style
 """
     return f"""{prompt}
 
