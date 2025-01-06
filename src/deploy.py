@@ -23,7 +23,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import APIRouter, HTTPException, Depends
 from src.s3_upload import upload_character_to_s3, upload_knowledge_to_s3
 from pydantic import BaseModel, Field, ValidationError, validator, EmailStr
-from src.deployment_service import DeploymentService
+from src.deployment_service import DeploymentService, notify_deployment_server
 from src.agent_service import AgentService
 from src.types import KnowledgeFile, TwitterCredentials, DiscordCredentials, TelegramCredentials, ClientConfig, SignatureRequest, AgentStatus, DeploymentResponse
 
@@ -187,6 +187,7 @@ async def deploy(
             address,
             agent_id,
             json_content,
+            client_config,
             character_url,
             character_hash,
             knowledge_urls
@@ -216,9 +217,41 @@ async def deploy(
         logger.error(f"Deployment failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Define request and response models
+class AgentStartRequest(BaseModel):
+    agent_id: str
+    signature: str
+    message: str
+
+@deploy_router.post("/agent/start")
+async def start_agent(request: AgentStartRequest):   
+    agent_service = AgentService(db)
+    deployment_service = DeploymentService(db)
+    
+    address = verify_signature(request.signature, request.message)
+    await agent_service.verify_agent_ownership(address, request.agent_id)
+    await deployment_service.verify_crypto_balance(address)
+    
+    try:
+        character_url, knowledge_urls = await agent_service.start_agent(request.agent_id)
+         # Return response
+        return DeploymentResponse(
+            agent_id=request.agent_id,
+            character_url=character_url,
+            signature=request.signature,
+            message=request.message,
+            knowledge_files=knowledge_urls
+        ).dict()
+
+    except HTTPException as he:
+        # Re-raise existing HTTP exceptions
+        raise he
+    except Exception as e:
+        logger.error(f"Failed to start agent: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-async def update_agent(address: str, agent_id: str, json_content: Any, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str]):
+async def update_agent(address: str, agent_id: str, json_content: Any, client_config: ClientConfig, character_s3_url: str, md5_hash: str, s3_url_knowledge_files: List[str]):
     result = db.agents.update_one(
             {"agent_id": agent_id},
             {"$set": {
@@ -227,6 +260,7 @@ async def update_agent(address: str, agent_id: str, json_content: Any, character
                 "version": "v1",
                 "bio": json_content["bio"],
                 "address": address,
+                "client_config": client_config.dict(),
                 "character_s3_url": character_s3_url,
                 "character_content_md5_hash": md5_hash,                
                 "knowledge": s3_url_knowledge_files,
@@ -240,89 +274,6 @@ async def update_agent(address: str, agent_id: str, json_content: Any, character
 
 
 
-
-async def notify_deployment_server(
-    agent_id: str,
-    character_url: str,
-    knowledge_files: List[Dict],
-    client_config: Dict
-) -> None:
-    """
-    Notify the deployment server about the new agent deployment.
-    
-    Args:
-        agent_id: UUID of the deployed agent
-        character_url: S3 URL of the character file
-        knowledge_files: List of knowledge file information
-        client_config: Client configuration containing credentials
-    """
-    # Format knowledge files into expected structure
-    knowledge_dict = {
-        k["filename"]: k["s3_url"].replace("https", "s3").replace(".s3.amazonaws.com", "")
-        for k in knowledge_files
-    }
-
-    knowledge_filenames = ','.join(f"{k['filename']}" for k in knowledge_files)
-    logger.info(knowledge_dict)
-    logger.info(client_config)
-    logger.info(knowledge_filenames)
-    
-    # Construct environment variables from client config
-    env = {
-        "TOGETHER_MODEL_LARGE": os.getenv('TOGETHER_MODEL_LARGE'),
-        "TOGETHER_MODEL_MEDIUM": os.getenv("TOGETHER_MODEL_MEDIUM"),
-        "TOGETHER_MODEL_SMALL": os.getenv("TOGETHER_MODEL_SMALL"),
-        "TOGETHER_API_KEY": os.getenv("TOGETHER_API_KEY"),
-        "USE_TOGETHER_EMBEDDING": "true",
-        "KNOWLEDGE_DIR": "/app/knowledge/", 
-        "KNOWLEDGE_FILES": knowledge_filenames
-    }
-    logger.info(env)
-
-    # Add client credentials to env if they exist
-    if client_config.get("twitter"):
-        env["TWITTER_USERNAME"] = client_config["twitter"].get("username", "")
-        env["TWITTER_PASSWORD"] = client_config["twitter"].get("password", "")
-    
-   # Add client credentials to env if they exist
-    if client_config.get("discord"):
-        env["DISCORD_APPLICATION_ID"] = client_config["discord"].get("discord_application_id", "")
-        env["DISCORD_API_TOKEN"] = client_config["discord"].get("discord_api_token", "")
-        if client_config["discord"].get("discord_voice_channel_id"):
-            env["DISCORD_VOICE_CHANNEL_ID"] = client_config["discord"].get("discord_voice_channel_id")
-
-   # Add client credentials to env if they exist
-    if client_config.get("telegram"):
-        env["TELEGRAM_BOT_TOKEN"] = client_config["telegram"].get("telegram_bot_token", "")
-
-    logger.info(env)
-    # Prepare the payload
-    payload = {
-        "id": agent_id,
-        "character": character_url.replace("https", "s3").replace(".s3.amazonaws.com", ""),
-        "knowledge": knowledge_dict,
-        "env": env
-    }
-    
-    logger.info(json.dumps(payload))
-    try:
-        # Get the deployment server URL from environment variables
-        deployment_server_url = os.getenv("MARLIN_SERVER_URL")
-        if not deployment_server_url:
-            logger.error("MARLIN_SERVER_URL not configured")
-            return
-            
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{deployment_server_url}/deploy",
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
-            response.raise_for_status()
-            logger.info(f"Successfully notified deployment server for agent {agent_id}")
-            
-    except Exception as e:
-        logger.error(f"Failed to notify deployment server: {str(e)}")
 
 # Define request and response models
 class LogRequest(BaseModel):

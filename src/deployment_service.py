@@ -13,6 +13,7 @@ from src.utils.extract_pdf import extract_paragraphs_from_pdf
 from dotenv import load_dotenv
 import os
 from src.get_balance import get_account_balance, get_token_balance
+import httpx
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -164,3 +165,89 @@ class DeploymentService:
         # Uncomment and modify as needed
         # if balance < float(balance_threshold):
         #     raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
+
+
+async def notify_deployment_server(
+    agent_id: str,
+    character_url: str,
+    knowledge_files: List[Dict],
+    client_config: Dict
+) -> bool:
+    """
+    Notify the deployment server about the new agent deployment.
+    
+    Args:
+        agent_id: UUID of the deployed agent
+        character_url: S3 URL of the character file
+        knowledge_files: List of knowledge file information
+        client_config: Client configuration containing credentials
+    """
+    # Format knowledge files into expected structure
+    knowledge_dict = {
+        k["filename"]: k["s3_url"].replace("https", "s3").replace(".s3.amazonaws.com", "")
+        for k in knowledge_files
+    }
+
+    knowledge_filenames = ','.join(f"{k['filename']}" for k in knowledge_files)
+    logger.info(knowledge_dict)
+    logger.info(client_config)
+    logger.info(knowledge_filenames)
+    
+    # Construct environment variables from client config
+    env = {
+        "TOGETHER_MODEL_LARGE": os.getenv('TOGETHER_MODEL_LARGE'),
+        "TOGETHER_MODEL_MEDIUM": os.getenv("TOGETHER_MODEL_MEDIUM"),
+        "TOGETHER_MODEL_SMALL": os.getenv("TOGETHER_MODEL_SMALL"),
+        "TOGETHER_API_KEY": os.getenv("TOGETHER_API_KEY"),
+        "USE_TOGETHER_EMBEDDING": "true",
+        "KNOWLEDGE_DIR": "/app/knowledge/", 
+        "KNOWLEDGE_FILES": knowledge_filenames
+    }
+    logger.info(env)
+
+    # Add client credentials to env if they exist
+    if client_config.get("twitter"):
+        env["TWITTER_USERNAME"] = client_config["twitter"].get("username", "")
+        env["TWITTER_PASSWORD"] = client_config["twitter"].get("password", "")
+    
+   # Add client credentials to env if they exist
+    if client_config.get("discord"):
+        env["DISCORD_APPLICATION_ID"] = client_config["discord"].get("discord_application_id", "")
+        env["DISCORD_API_TOKEN"] = client_config["discord"].get("discord_api_token", "")
+        if client_config["discord"].get("discord_voice_channel_id"):
+            env["DISCORD_VOICE_CHANNEL_ID"] = client_config["discord"].get("discord_voice_channel_id")
+
+   # Add client credentials to env if they exist
+    if client_config.get("telegram"):
+        env["TELEGRAM_BOT_TOKEN"] = client_config["telegram"].get("telegram_bot_token", "")
+
+    logger.info(env)
+    # Prepare the payload
+    payload = {
+        "id": agent_id,
+        "character": character_url.replace("https", "s3").replace(".s3.amazonaws.com", ""),
+        "knowledge": knowledge_dict,
+        "env": env
+    }
+    
+    logger.info(json.dumps(payload))
+    try:
+        # Get the deployment server URL from environment variables
+        deployment_server_url = os.getenv("MARLIN_SERVER_URL")
+        if not deployment_server_url:
+            logger.error("MARLIN_SERVER_URL not configured")
+            return False
+            
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{deployment_server_url}/deploy",
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully notified deployment server for agent {agent_id}")
+            
+    except Exception as e:
+        logger.error(f"Failed to notify deployment server: {str(e)}")
+        return False
+    return True
