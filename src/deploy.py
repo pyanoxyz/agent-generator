@@ -260,8 +260,10 @@ async def notify_deployment_server(
         for k in knowledge_files
     }
 
+    knowledge_filenames = ','.join(f"{k['filename']}" for k in knowledge_files)
     logger.info(knowledge_dict)
     logger.info(client_config)
+    logger.info(knowledge_filenames)
     
     # Construct environment variables from client config
     env = {
@@ -269,7 +271,9 @@ async def notify_deployment_server(
         "TOGETHER_MODEL_MEDIUM": os.getenv("TOGETHER_MODEL_MEDIUM"),
         "TOGETHER_MODEL_SMALL": os.getenv("TOGETHER_MODEL_SMALL"),
         "TOGETHER_API_KEY": os.getenv("TOGETHER_API_KEY"),
-        "USE_TOGETHER_EMBEDDING": "true"
+        "USE_TOGETHER_EMBEDDING": "true",
+        "KNOWLEDGE_DIR": "/app/knowledge/", 
+        "KNOWLEDGE_FILES": knowledge_filenames
     }
     logger.info(env)
 
@@ -298,7 +302,7 @@ async def notify_deployment_server(
         "env": env
     }
     
-    logger.info(payload)
+    logger.info(json.dumps(payload))
     try:
         # Get the deployment server URL from environment variables
         deployment_server_url = os.getenv("MARLIN_SERVER_URL")
@@ -352,10 +356,10 @@ async def get_logs(request: LogRequest):
             )
     except httpx.HTTPError as e:
         logger.error(f"HTTP error occurred: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve logs: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to retrieve logs: {str(e)}")
     except Exception as e:
         logger.error(f"Unexpected error occurred: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Define request and response models
@@ -386,19 +390,22 @@ async def shutdown_agent(request: AgentShutdownRequest):
                 json={"id": request.agent_id},  # Properly structured payload
                 headers={"Content-Type": "application/json"}
             )
-            print (response.text)
             response.raise_for_status()
             await agent_service.stop_agent(request.agent_id)
             return AgentShutdownResponse(
                 success=True,
                 message="Agent removed successfully"
             )
+
+    except HTTPException as he:
+        # Re-raise existing HTTP exceptions
+        raise he
     except httpx.HTTPError as e:
         logger.error(f"HTTP error occurred: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve logs: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to Shutdown agent: {str(e)}")
     except Exception as e:
         logger.error(f"Unexpected error occurred: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Define request and response models
@@ -415,15 +422,22 @@ class GetAgentsResponse(BaseModel):
 async def get_agents(request: GetAgentsRequest):
     try:
         agent_service = AgentService(db)
+        deployment_service = DeploymentService(db)
+        await deployment_service.verify_user(request.address)
+
         agents = await agent_service.get_agents(request.address)
         return GetAgentsResponse(
             address=request.address,
             agents=agents
         )
         
+    except HTTPException as he:
+        # Re-raise existing HTTP exceptions
+        raise he
+
     except Exception as e:
         logger.error(f"Error retrieving agents: {str(e)}")
         raise HTTPException(
-            status_code=500, 
+            status_code=400, 
             detail=f"Failed to retrieve agents: {str(e)}"
         )
