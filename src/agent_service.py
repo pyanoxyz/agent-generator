@@ -30,11 +30,7 @@ class AgentService:
         
         async for agent in cursor:
             agents.append(agent)
-            
-        if not agents:
-            logger.error(f"{address} havent deployed any agents")
-            raise HTTPException(status_code=404, detail=f"User {address} must deploy agents first")
-            
+
         logger.info(f"Found {len(agents)} agents for address {address}")
         return agents
 

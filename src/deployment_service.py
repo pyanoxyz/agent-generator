@@ -25,7 +25,6 @@ load_dotenv(root_dir / '.env')
 
 # Initialize MongoDB client
 token_address = os.getenv('TOKEN_ADDRESS')
-allowed_agents = os.getenv('ALLOWED_AGENTS')
 env = os.getenv('ENV')
 
 
@@ -214,6 +213,7 @@ async def notify_deployment_server(
     if client_config.get("twitter"):
         env["TWITTER_USERNAME"] = client_config["twitter"].get("username", "")
         env["TWITTER_PASSWORD"] = client_config["twitter"].get("password", "")
+        env["TWITTER_EMAIL"] = client_config["twitter"].get("email", "")
     
    # Add client credentials to env if they exist
     if client_config.get("discord"):
