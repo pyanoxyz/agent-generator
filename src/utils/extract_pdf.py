@@ -2,7 +2,7 @@ import io
 # import fitz
 from typing import Optional, Dict, List
 import pdfplumber
-
+import re
 # async def extract_paragraphs_from_pdf(content: bytes) -> List[str]:
 #     """
 #     Extract text content from PDF using PyMuPDF (fitz) with decoding support
@@ -50,32 +50,61 @@ import pdfplumber
 #         print(f"Error extracting PDF content: {str(e)}")
 #         return []
 
-     
+
+def clean_text(text: str) -> str:
+    """
+    Clean and format the extracted text.
+    """
+    # Split words that are incorrectly joined (camel case separation)
+    text = re.sub(r'(?<!^)(?=[A-Z][a-z])', ' ', text)
+    
+    # Fix common spacing issues
+    text = re.sub(r'(?<=\w)\.(?=\w)', '. ', text)  # Add space after period
+    text = re.sub(r'(?<=\w),(?=\w)', ', ', text)   # Add space after comma
+    text = re.sub(r'\s+', ' ', text)               # Remove multiple spaces
+    
+    # Fix specific patterns in your text
+    text = text.replace('(cid:', ' (cid:')
+    text = text.replace('github.', 'github.')
+    
+    # Split joined words
+    def split_words(match):
+        word = match.group(0)
+        return ' '.join(re.findall('[A-Z][a-z]*', word))
+    
+    text = re.sub(r'[A-Z][a-z]+(?=[A-Z])', split_words, text)
+    
+    return text.strip()
+
 def extract_paragraphs_from_pdf(pdf_bytes: bytes) -> List[str]:
     """
-    Extract text from a PDF file while ignoring images.
-
-    Args:
-        pdf_path (str): Path to the PDF file
-
-    Returns:
-        str: Extracted text from the PDF
+    Extract text from a PDF file while preserving proper formatting.
     """
     full_text = []
     pdf_file = io.BytesIO(pdf_bytes)
+    
     try:
-        # Open the PDF file
         with pdfplumber.open(pdf_file) as pdf:
-            # Iterate through all pages
             for page in pdf.pages:
-                # Extract text from the current page
-                text = page.extract_text()
+                # Extract text with custom settings
+                text = page.extract_text(
+                    layout=True,
+                    x_tolerance=2,
+                    y_tolerance=2
+                )
+                
                 if text:
-                    full_text.append(text)
-
-        # Join all the text with newlines
-        return full_text
-
+                    # Clean and format the text
+                    cleaned_text = clean_text(text)
+                    
+                    # Additional formatting for specific patterns in your resume
+                    cleaned_text = re.sub(r'(?<=\d)–(?=\d)', ' – ', cleaned_text)  # Fix date ranges
+                    cleaned_text = re.sub(r'(?<=\w)•(?=\w)', ' • ', cleaned_text)  # Fix bullet points
+                    
+                    full_text.append(cleaned_text)
+            
+            return full_text
+            
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return None

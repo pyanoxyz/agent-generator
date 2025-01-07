@@ -25,6 +25,7 @@ load_dotenv(root_dir / '.env')
 
 # Initialize MongoDB client
 token_address = os.getenv('TOKEN_ADDRESS')
+allowed_agents = os.getenv('ALLOWED_AGENTS')
 env = os.getenv('ENV')
 
 
@@ -43,6 +44,8 @@ class DeploymentService:
         logger.info(f"User {address} is registered")
         return
     
+
+
 
     async def verify_character_uniqueness(self, address: str, content_hash: str) -> None:
         """Check if character already exists"""
@@ -99,7 +102,7 @@ class DeploymentService:
             json_filename = Path(file.filename).stem + '.json'
 
             if file_type == 'application/pdf':
-                paragraphs = await extract_paragraphs_from_pdf(content)
+                paragraphs = extract_paragraphs_from_pdf(content)
                 file_content = {"documents": paragraphs}
                 logger.info(f"Successfully extracted {len(paragraphs)} paragraphs from {file.filename}")
             else:

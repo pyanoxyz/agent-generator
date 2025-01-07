@@ -130,15 +130,18 @@ async def deploy(
         Dict containing deployment information
     """
     deployment_service = DeploymentService(db)
+    agent_service = AgentService(db)
     agent_id = str(uuid.uuid4())
     logger.info(f"agent_id = {agent_id}")
+    logger.info(f"signature = {signature}")
+    logger.info(f"Message = [{message}]")
     
     try:
         # Verify user and signature
         address = verify_signature(signature, message)
         logger.info(f"agent_id = {agent_id} for address {address}")
         await deployment_service.verify_user(address)
-
+        await agent_service.verify_allowed_agents(address)
         # Process character file
         character_content, character_hash, json_content = await deployment_service.process_character_file(character)
         await deployment_service.verify_character_uniqueness(address, character_hash)
