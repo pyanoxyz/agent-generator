@@ -12,9 +12,8 @@ root_dir = current_dir.parent
 load_dotenv(root_dir / '.env')
 
 # Configure logging
-ETH_BALANCE_URL = os.getenv("ETH_BALANCE_URL")
 
-def get_account_balance(address: str) -> float:
+def get_native_balance(address: str, url: str) -> float:
     """
     Get ETH balance for an address using Alchemy API
     
@@ -36,7 +35,7 @@ def get_account_balance(address: str) -> float:
     headers = {"accept": "application/json", "content-type": "application/json"}
     
     try:
-        response = requests.post(ETH_BALANCE_URL, json=payload, headers=headers)
+        response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         
         # Convert wei to ETH
@@ -49,7 +48,7 @@ def get_account_balance(address: str) -> float:
         raise Exception(f"Failed to get balance: {str(e)}")
 
 
-def get_token_balance(address: str, token_address: str) -> float:
+def get_token_balance(address: str, url: str, token_address: str) -> float:
     """
     Get ERC20 token balance for an address using Alchemy API
     
@@ -78,7 +77,7 @@ def get_token_balance(address: str, token_address: str) -> float:
     headers = {"accept": "application/json", "content-type": "application/json"}
     
     try:
-        response = requests.post(ETH_BALANCE_URL, json=payload, headers=headers)
+        response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         
         # Convert result to decimal

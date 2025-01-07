@@ -163,6 +163,7 @@ async def deploy(
         # Process character file
         character_content, character_hash, json_content = await deployment_service.process_character_file(character)
         await deployment_service.verify_character_uniqueness(address, character_hash)
+        await deployment_service.verify_crypto_balance(address)
         
         # Upload character to S3
         character_url = await upload_character_to_s3(
@@ -201,7 +202,6 @@ async def deploy(
         )
 
         # Verify crypto balance
-        await deployment_service.verify_crypto_balance(address)
 
         # Update database
         await update_agent(

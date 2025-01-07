@@ -12,7 +12,7 @@ from pathlib import Path
 from src.utils.extract_pdf import extract_paragraphs_from_pdf
 from dotenv import load_dotenv
 import os
-from src.get_balance import get_account_balance, get_token_balance
+from src.get_balance import get_native_balance, get_token_balance
 import httpx
 
 # Get the parent directory of the current file (src/)
@@ -25,6 +25,12 @@ load_dotenv(root_dir / '.env')
 
 # Initialize MongoDB client
 token_address = os.getenv('TOKEN_ADDRESS')
+balance_threshold = os.getenv('BALANCE_THRESHOLD')
+token_threshold = os.getenv('TOKEN_THRESHOLD')
+
+ETH_URL = os.getenv("ETH_URL")
+BASE_URL = os.getenv("BASE_URL")
+
 env = os.getenv('ENV')
 
 
@@ -162,13 +168,22 @@ class DeploymentService:
 
     async def verify_crypto_balance(self, address: str) -> None:
         """Verify crypto balance meets threshold"""
-        balance = get_token_balance(address, token_address) if token_address else get_account_balance(address)
-        logger.success(f"{address} BALANCE is {balance}")
-        
-        # Uncomment and modify as needed
-        if env == "production":
-            if balance < float(balance_threshold):
-                raise HTTPException(status_code=400, detail=f"Insufficient balance: {balance}")
+        ##First check balance on Eth
+        eth_balance = get_native_balance(address, ETH_URL)
+        if eth_balance < float(balance_threshold):
+            logger.error(f"Address=[{address}] doesnt have suiffcient eth balance on ETH, Balance=[{eth_balance}]")
+            token_balance = get_token_balance(address, ETH_URL, token_address)
+            if token_balance < float(token_threshold):
+                logger.error(f"Address=[{address}] doesnt have suiffcient virtuals balance on ETH, Balance=[{token_balance}]")
+                base_balance = get_native_balance(address, BASE_URL)
+                if base_balance < float(balance_threshold):
+                    logger.error(f"Address=[{address}] doesnt have suiffcient balance on BASE, Balance=[{base_balance}]")
+                    raise HTTPException(status_code=400, detail=f"Insufficient balance on ETH blockchain for Eth: Required {balance_threshold}\
+                                                  Insufficient balance on ETH blockchain for Virtuals: Required {token_threshold}\
+                                                  Insufficient balance on Base blockchain for Eth: {balance_threshold}  ")
+
+        return
+
 
 
 async def notify_deployment_server(
