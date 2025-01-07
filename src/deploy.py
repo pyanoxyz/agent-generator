@@ -97,7 +97,7 @@ async def check_registered(request: CheckRegistered):
        
         deployment_service = DeploymentService(db)        
 
-        deployment_service.verify_user(request.address)
+        await deployment_service.verify_user(request.address)
         
         
         return {"address": request.address, "registered": True}
