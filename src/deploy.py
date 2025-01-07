@@ -25,7 +25,7 @@ from src.s3_upload import upload_character_to_s3, upload_knowledge_to_s3
 from pydantic import BaseModel, Field, ValidationError, validator, EmailStr
 from src.deployment_service import DeploymentService, notify_deployment_server
 from src.agent_service import AgentService
-from src.types import KnowledgeFile, TwitterCredentials, DiscordCredentials, TelegramCredentials, ClientConfig, SignatureRequest, AgentStatus, DeploymentResponse
+from src.types import KnowledgeFile, TwitterCredentials, DiscordCredentials, TelegramCredentials, ClientConfig, SignatureRequest, AgentStatus, DeploymentResponse, CheckRegistered
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -83,6 +83,24 @@ async def register(request: SignatureRequest):
         )
         
         return {"address": address, "verified": True}
+    
+    except Exception as e:
+        logger.error(f"Error in wallet verification: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@deploy_router.post("/check_registered")
+async def check_registered(request: CheckRegistered):
+    """
+    Verify a wallet address exists in MongoDB.
+    """
+    try:
+       
+        deployment_service = DeploymentService(db)        
+
+        deployment_service.verify_user(request.address)
+        
+        
+        return {"address": request.address, "registered": True}
     
     except Exception as e:
         logger.error(f"Error in wallet verification: {str(e)}")
