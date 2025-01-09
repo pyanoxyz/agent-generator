@@ -1,6 +1,23 @@
 from pydantic import BaseModel, Field, EmailStr
-from typing import Optional, Dict, List
+from typing import Optional, Any, Dict, List
 from enum import Enum
+from fastapi import Form, UploadFile, File, HTTPException
+
+class CharacterEditRequest(BaseModel):
+    prompt: str = Form(...),
+    update_key: str = Form(...),
+    character: UploadFile = File(...)
+
+
+class CharacterEditResponse(BaseModel):
+    update: Dict[str, Any]
+
+class CharacterRequest(BaseModel):
+    prompt: str
+
+class CharacterResponse(BaseModel):
+    character_json: dict
+
 class AgentStatus(Enum):
     RUNNING = "running"
     STOPPED = "stopped"

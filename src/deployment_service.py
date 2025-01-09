@@ -69,7 +69,8 @@ class DeploymentService:
                 detail="Agent has already been deployed or deployment in process"
             )
 
-    async def process_character_file(self, character: UploadFile) -> tuple[bytes, str]:
+    @staticmethod
+    async def process_character_file(character: UploadFile) -> tuple[bytes, str]:
         """Process and validate character file"""
         try:
             content = await character.read()
