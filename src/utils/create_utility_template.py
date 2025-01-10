@@ -21,7 +21,7 @@ def create_utility_template(character_request: CharacterRequest) -> str:
         Required structure:
         {
         "name": "...",
-        "bio": "...",
+        "bio": "[]",
         "lore": [],
         "messageExamples": [],
         "postExamples": [],
@@ -31,10 +31,12 @@ def create_utility_template(character_request: CharacterRequest) -> str:
             "chat": [],
             "post": []
         },
-        "adjectives": []
+        "adjectives": [],
+        "clients": [],
+        "modelProvider": ""
         }
 
-        Use "openai" as modelProvider and "twitter" as clients if not specified otherwise.
+        Use "together" as modelProvider and "twitter" as clients if not specified otherwise.
         Generate a complete character.json that is valid and includes:
         - Single, consolidated bio
         - Straightforward, uniform lore (no randomization)
@@ -48,7 +50,7 @@ def create_utility_template(character_request: CharacterRequest) -> str:
 
         {
         "name": "PredictableServiceBot",
-        "bio": "I am a service-oriented bot focused on delivering concise, consistent, and repeatable responses to common inquiries.",
+        "bio": ["I am a service-oriented bot focused on delivering concise, consistent, and repeatable responses to common inquiries."],
         "lore": [
             "Created to handle routine tasks without deviation",
             "Programmed for precise and predictable output"
