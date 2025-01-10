@@ -21,18 +21,19 @@ def create_utility_template(character_request: CharacterRequest) -> str:
         Required structure:
         {
         "name": "...",
-        "bio": "[]",
-        "lore": [],
+        "bio": [""],
+        "lore": [""],
+        "knowledge": [""],
         "messageExamples": [],
-        "postExamples": [],
-        "topics": [],
+        "postExamples": [""],
+        "topics": [""],
         "style": {
-            "all": [],
-            "chat": [],
-            "post": []
+            "all": [""],
+            "chat": [""],
+            "post": [""]
         },
-        "adjectives": [],
-        "clients": [],
+        "adjectives": [""],
+        "clients": [""],
         "modelProvider": ""
         }
 
@@ -117,7 +118,8 @@ def create_utility_template(character_request: CharacterRequest) -> str:
             "uniform",
             "repetitive",
             "reliable"
-        ]
+        ],
+        "knowledge": [""],
         }
         """
     return f"""{prompt}
