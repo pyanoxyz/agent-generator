@@ -170,18 +170,19 @@ class DeploymentService:
     async def verify_crypto_balance(self, address: str) -> None:
         """Verify crypto balance meets threshold"""
         ##First check balance on Eth
-        eth_balance = get_native_balance(address, ETH_URL)
-        if eth_balance < float(balance_threshold):
-            logger.error(f"Address=[{address}] doesnt have suiffcient eth balance on ETH, Balance=[{eth_balance}]")
-            token_balance = get_token_balance(address, ETH_URL, token_address)
-            if token_balance < float(token_threshold):
-                logger.error(f"Address=[{address}] doesnt have suiffcient virtuals balance on ETH, Balance=[{token_balance}]")
-                base_balance = get_native_balance(address, BASE_URL)
-                if base_balance < float(balance_threshold):
-                    logger.error(f"Address=[{address}] doesnt have suiffcient balance on BASE, Balance=[{base_balance}]")
-                    raise HTTPException(status_code=400, detail=f"Insufficient balance on ETH blockchain for Eth: Required {balance_threshold}\
-                                                  Insufficient balance on ETH blockchain for Virtuals: Required {token_threshold}\
-                                                  Insufficient balance on Base blockchain for Eth: {balance_threshold}  ")
+        if env == "production":
+            eth_balance = get_native_balance(address, ETH_URL)
+            if eth_balance < float(balance_threshold):
+                logger.error(f"Address=[{address}] doesnt have suiffcient eth balance on ETH, Balance=[{eth_balance}]")
+                token_balance = get_token_balance(address, ETH_URL, token_address)
+                if token_balance < float(token_threshold):
+                    logger.error(f"Address=[{address}] doesnt have suiffcient virtuals balance on ETH, Balance=[{token_balance}]")
+                    base_balance = get_native_balance(address, BASE_URL)
+                    if base_balance < float(balance_threshold):
+                        logger.error(f"Address=[{address}] doesnt have suiffcient balance on BASE, Balance=[{base_balance}]")
+                        raise HTTPException(status_code=400, detail=f"Insufficient balance on ETH blockchain for Eth: Required {balance_threshold}\
+                                                    Insufficient balance on ETH blockchain for Virtuals: Required {token_threshold}\
+                                                    Insufficient balance on Base blockchain for Eth: {balance_threshold}  ")
 
         return
 

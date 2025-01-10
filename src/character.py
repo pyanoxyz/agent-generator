@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException, Depends, FastAPI
 from src.utils.create_utility_template import create_utility_template
 from src.utils.create_character_template import create_character_template
 from src.utils.edit_template import edit_character_template
-from src.types import CharacterRequest, CharacterResponse, CharacterEditRequest, CharacterEditResponse
+from src.types import CharacterRequest, CharacterResponse, CharacterEditResponse
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -42,9 +42,6 @@ llm = ChatTogether(
     temperature=0.7,
     max_tokens=16000
 )
-
-
-
 
 def extract_json(response):
     """Extract the JSON from the response"""

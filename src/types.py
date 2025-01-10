@@ -3,12 +3,6 @@ from typing import Optional, Any, Dict, List
 from enum import Enum
 from fastapi import Form, UploadFile, File, HTTPException
 
-class CharacterEditRequest(BaseModel):
-    prompt: str = Form(...),
-    update_key: str = Form(...),
-    character: UploadFile = File(...)
-
-
 class CharacterEditResponse(BaseModel):
     update: Dict[str, Any]
 
