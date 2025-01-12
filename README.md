@@ -1,12 +1,62 @@
 
+
+# AI Agent Generator
+
+A simple framework for deploying and managing AI agents on secure cloud infrastructure using ElizaOS.
+
+## What is it?
+
+AI Agent Generator is an orchestration layer built on top of the ElizaOS open-source framework. It helps you easily deploy and manage AI agents in a secure environment (Trusted Execution Environment) on Marlin Cloud.
+
+## Key Features
+
+- **Easy Agent Deployment**: Create and deploy AI agents with simple configuration
+- **Secure Environment**: Run your agents in a Trusted Execution Environment (TEE) on Marlin Cloud
+- **Multi-Platform Support**: 
+  - Twitter integration
+  - Discord integration
+  - Telegram integration
+- **Character Generation**: AI-powered character profile generation
+- **Knowledge Base**: Import knowledge from PDFs and other documents
+- **Blockchain Authentication**: Secure access using your crypto wallet
+
+## Getting Started
+
+1. **Set Up Your Environment**
+   - Install Python 3.8 or higher
+   - Create a `.env` file with your configuration
+   - Ensure you have a crypto wallet for authentication
+
+2. **Create Your Agent**
+   - Design your agent's character profile
+   - Add knowledge base documents (PDFs, text files)
+   - Configure social media integrations
+
+3. **Deploy**
+   - Authenticate with your wallet
+   - Upload your agent configuration
+   - Monitor your agent's status
+
+## Need Help?
+
+- Submit issues on our GitHub repository
+- Join our community Discord server
+- Check out the ElizaOS documentation
+
+## Learn More
+
+- [ElizaOS Documentation](https://elizaos.github.io/eliza/docs/intro/)
+- [Marlin Cloud](https://www.marlin.org/)
+- [Trusted Execution Environments](https://en.wikipedia.org/wiki/Trusted_execution_environment)
+
+
 #### How to generater character.json
 ```
 Please note that the returned response doesnt have knowldge, client, modelproviders and plugin keys 
 since these are all being provided by the user.
 
 API_CALL: 
-  r = requests.post("http://localhost:8000/api/v1/generate_character", json={"prompt": "generate
-     ...: an AI agent that could act as a devrel agent"})
+  r = requests.post("http://localhost:8000/api/v1/generate_character", json={"prompt": "generatean AI agent that could act as a devrel agent"})
 
 RESPONSE:
   {'character_json': {'name': 'DevRelAssistant',
