@@ -67,44 +67,6 @@ def extract_json(response):
     else:
         return json.loads(response)
 
-# @character_router.post("/generate_character", response_model=CharacterResponse)
-# async def generate_character(request: CharacterRequest):
-#     """Generate a character.json based on the request"""
-#     # """Generate a character.json based on the request and RAG context."""
-#     try:
-#         # Generate character JSON
-#         logger.info("Sending prompt")
-#         # response = llm(prompt)
-#         messages = [
-#             (
-#                 "system",
-#                 "You are helpful assistant.",
-#             ),
-#             (request.prompt)
-#             ]
-#         ai_msg = llm.invoke(messages)               
-#         response = ai_msg.content
-        
-        
-#         # Parse and validate the generated JSON
-#         try:
-#             logger.info(response)
-#             character_json = extract_json(response)
-#             logger.info(f"saved to {character_json['name']}.json")
-#             # with open(f"characters/{character_json['name']}_{'{date:%Y-%m-%d_%H:%M:%S}.txt'.format( date=datetime.datetime.now() )}.json", "w+") as f:
-#             #     json.dump(character_json, f, indent=2)
-#         except json.JSONDecodeError:
-#             raise HTTPException(status_code=422, detail="Generated invalid JSON")
-        
-#         # Return response with character JSON and sources
-#         return CharacterResponse(
-#             character_json=character_json,
-#             # reference_sources=[doc.metadata['source'] for doc in result['source_documents']]
-#         )
-        
-#     except Exception as e:
-#         logger.error(f"Error generating character: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @character_router.post("/generate_character", response_model=CharacterResponse)
