@@ -1,22 +1,13 @@
 import os
-import re
-import io
 import uuid
-import json
-import magic
-import boto3
-import fitz
 import httpx
-from PIL import Image
-from enum import Enum
-from web3 import Web3
+from pathlib import Path
 from web3.auto import w3
 from loguru import logger
-from pathlib import Path
 from  datetime import datetime
 from dotenv import load_dotenv
 from fastapi import Form, UploadFile, File
-from botocore.exceptions import ClientError
+from src.agent_service import AgentService
 from typing import Optional, Dict, Any, List
 from eth_account.messages import encode_defunct
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -24,8 +15,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from src.s3_upload import upload_character_to_s3, upload_knowledge_to_s3
 from pydantic import BaseModel, Field, ValidationError, validator, EmailStr
 from src.deployment_service import DeploymentService, notify_deployment_server
-from src.agent_service import AgentService
-from src.types import KnowledgeFile, TwitterCredentials, DiscordCredentials, TelegramCredentials, ClientConfig, SignatureRequest, AgentStatus, DeploymentResponse, CheckRegistered
+from src.types import ClientConfig, SignatureRequest, AgentStatus, DeploymentResponse, CheckRegistered
+from nacl.signing import SigningKey, VerifyKey
+from nacl.encoding import RawEncoder
+import base58
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -63,6 +56,54 @@ def verify_signature(signature: str, message: str) -> str:
         logger.error(f"Error verifying signature: {str(e)}")
         raise HTTPException(status_code=400, message="Invalid signature")
 
+
+def verify_sol_signature(public_key_base58: str, message: str, signature_base58: str):
+    # Decode the base58 public key and signature
+    public_key = base58.b58decode(public_key_base58)
+    signature = base58.b58decode(signature_base58)
+
+    if len(signature) != 64:
+        raise ValueError("The signature must be exactly 64 bytes long.")
+
+    # Create a VerifyKey object from the public key
+    verify_key = VerifyKey(public_key, encoder=RawEncoder)
+
+    # Verify the signature
+    try:
+        verify_key.verify(message.encode(), signature)
+        return True
+    except Exception as e:
+        logger.error(f"Signature verification failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+
+
+# @deploy_router.post("/register")
+# async def register(request: SignatureRequest):
+#     """
+#     Verify a wallet signature and store the address in MongoDB.
+#     """
+#     try:
+#         # Verify the signature and get the address
+#         address = verify_signature(request.signature, request.message)
+        
+#         # Store in MongoDB
+#         result = db.users.update_one(
+#             {"address": address},
+#             {"$set": {
+#                 "address": address,
+#                 "last_verified": datetime.utcnow()
+#             }},
+#             upsert=True
+#         )
+        
+#         return {"address": address, "verified": True}
+    
+#     except Exception as e:
+#         logger.error(f"Error in wallet verification: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
 @deploy_router.post("/register")
 async def register(request: SignatureRequest):
     """
@@ -70,23 +111,25 @@ async def register(request: SignatureRequest):
     """
     try:
         # Verify the signature and get the address
-        address = verify_signature(request.signature, request.message)
-        
+        verify_sol_signature(request.public_key, request.message, request.signature)
+
         # Store in MongoDB
-        result = db.users.update_one(
-            {"address": address},
+        db.users.update_one(
+            {"address": request.public_key},
             {"$set": {
-                "address": address,
+                "address": request.public_key,
                 "last_verified": datetime.utcnow()
             }},
             upsert=True
         )
         
-        return {"address": address, "verified": True}
+        return {"address": request.public_key, "verified": True}
     
     except Exception as e:
         logger.error(f"Error in wallet verification: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @deploy_router.post("/check_registered")
 async def check_registered(request: CheckRegistered):
@@ -97,10 +140,10 @@ async def check_registered(request: CheckRegistered):
        
         deployment_service = DeploymentService(db)        
 
-        await deployment_service.verify_user(request.address)
+        await deployment_service.verify_user(request.public_key)
         
         
-        return {"address": request.address, "registered": True}
+        return {"address": request.public_key, "registered": True}
     
     except Exception as e:
         logger.error(f"Error in wallet verification: {str(e)}")
@@ -127,6 +170,7 @@ async def deploy(
     character: UploadFile = File(...),
     signature: str = Form(...),
     message: str = Form(...),
+    public_key: str = Form(...),
     knowledge_files: List[UploadFile] = File(None),
     client_twitter: Optional[str] = Form(None),
     client_discord: Optional[str] = Form(None),
@@ -156,18 +200,18 @@ async def deploy(
     
     try:
         # Verify user and signature
-        address = verify_signature(signature, message)
-        logger.info(f"agent_id = {agent_id} for address {address}")
-        await deployment_service.verify_user(address)
-        await agent_service.verify_allowed_agents(address)
+        verify_sol_signature(public_key, message, signature)
+        logger.info(f"agent_id = {agent_id} for address {public_key}")
+        await deployment_service.verify_user(public_key)
+        await agent_service.verify_allowed_agents(public_key)
         # Process character file
         character_content, character_hash, json_content = await deployment_service.process_character_file(character)
-        await deployment_service.verify_character_uniqueness(address, character_hash)
-        await deployment_service.verify_crypto_balance(address)
+        await deployment_service.verify_character_uniqueness(public_key, character_hash)
+        await deployment_service.verify_crypto_balance(public_key)
         
         # Upload character to S3
         character_url = await upload_character_to_s3(
-            address,
+            public_key,
             agent_id,
             character_content,
             'application/json'
@@ -181,7 +225,7 @@ async def deploy(
                 processed_file = await deployment_service.process_knowledge_file(file)
                 
                 knowledge_url = await upload_knowledge_to_s3(
-                    address,
+                    public_key,
                     agent_id,
                     processed_file.content,
                     processed_file.filename,
@@ -205,7 +249,7 @@ async def deploy(
 
         # Update database
         await update_agent(
-            address,
+            public_key,
             agent_id,
             json_content,
             client_config,
@@ -243,15 +287,16 @@ class AgentStartRequest(BaseModel):
     agent_id: str
     signature: str
     message: str
+    public_key: str
 
 @deploy_router.post("/agent/start")
 async def start_agent(request: AgentStartRequest):   
     agent_service = AgentService(db)
     deployment_service = DeploymentService(db)
     
-    address = verify_signature(request.signature, request.message)
-    await agent_service.verify_agent_ownership(address, request.agent_id)
-    await deployment_service.verify_crypto_balance(address)
+    verify_sol_signature(request.public_key, request.message, request.signature)
+    await agent_service.verify_agent_ownership(request.public_key, request.agent_id)
+    await deployment_service.verify_crypto_balance(request.public_key)
     
     try:
         character_url, knowledge_urls = await agent_service.start_agent(request.agent_id)
@@ -290,10 +335,6 @@ async def update_agent(address: str, agent_id: str, json_content: Any, client_co
             upsert=True
         )
     return
-
-
-
-
 
 
 # Define request and response models
@@ -341,6 +382,7 @@ class AgentShutdownRequest(BaseModel):
     agent_id: str
     signature: str
     message: str
+    public_key: str
 
 class AgentShutdownResponse(BaseModel):
     success: bool
@@ -351,8 +393,8 @@ class AgentShutdownResponse(BaseModel):
 async def shutdown_agent(request: AgentShutdownRequest):
     agent_service = AgentService(db)
     
-    address = verify_signature(request.signature, request.message)
-    await agent_service.verify_agent_ownership(address, request.agent_id)
+    verify_sol_signature(request.public_key, request.message, request.signature)
+    await agent_service.verify_agent_ownership(request.public_key, request.agent_id)
     try:
         deployment_server_url = os.getenv("MARLIN_SERVER_URL")
         if not deployment_server_url:

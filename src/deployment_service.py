@@ -12,9 +12,9 @@ from pathlib import Path
 from src.utils.extract_pdf import extract_paragraphs_from_pdf
 from dotenv import load_dotenv
 import os
-from src.get_balance import get_native_balance, get_token_balance
+from src.get_balance import get_native_balance
 import httpx
-
+import requests
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
 # Go up one level to get to the root directory where .env is
@@ -28,8 +28,8 @@ token_address = os.getenv('TOKEN_ADDRESS')
 balance_threshold = os.getenv('BALANCE_THRESHOLD')
 token_threshold = os.getenv('TOKEN_THRESHOLD')
 
-ETH_URL = os.getenv("ETH_URL")
-BASE_URL = os.getenv("BASE_URL")
+SOL_URL = os.getenv("SOL_URL")
+# BASE_URL = os.getenv("BASE_URL")
 
 env = os.getenv('ENV')
 
@@ -171,18 +171,16 @@ class DeploymentService:
         """Verify crypto balance meets threshold"""
         ##First check balance on Eth
         if env == "production":
-            eth_balance = get_native_balance(address, ETH_URL)
-            if eth_balance < float(balance_threshold):
-                logger.error(f"Address=[{address}] doesnt have suiffcient eth balance on ETH, Balance=[{eth_balance}]")
-                token_balance = get_token_balance(address, ETH_URL, token_address)
-                if token_balance < float(token_threshold):
-                    logger.error(f"Address=[{address}] doesnt have suiffcient virtuals balance on ETH, Balance=[{token_balance}]")
-                    base_balance = get_native_balance(address, BASE_URL)
-                    if base_balance < float(balance_threshold):
-                        logger.error(f"Address=[{address}] doesnt have suiffcient balance on BASE, Balance=[{base_balance}]")
-                        raise HTTPException(status_code=400, detail=f"Insufficient balance on ETH blockchain for Eth: Required {balance_threshold}\
-                                                    Insufficient balance on ETH blockchain for Virtuals: Required {token_threshold}\
-                                                    Insufficient balance on Base blockchain for Eth: {balance_threshold}  ")
+            sol_balance = get_native_balance(address, SOL_URL)
+            if sol_balance < float(balance_threshold):
+                # logger.error(f"Address=[{address}] doesnt have suiffcient eth balance on ETH, Balance=[{eth_balance}]")
+                # token_balance = get_token_balance(address, ETH_URL, token_address)
+                # if token_balance < float(token_threshold):
+                #     logger.error(f"Address=[{address}] doesnt have suiffcient virtuals balance on ETH, Balance=[{token_balance}]")
+                #     base_balance = get_native_balance(address, BASE_URL)
+                #     if base_balance < float(balance_threshold):
+                #         logger.error(f"Address=[{address}] doesnt have suiffcient balance on BASE, Balance=[{base_balance}]")
+                raise HTTPException(status_code=400, detail=f"Insufficient balance on Solana blockchain for Sol: Required {balance_threshold}")
 
         return
 
@@ -262,14 +260,14 @@ async def notify_deployment_server(
             
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{deployment_server_url}/deploy",
+                f"http://{deployment_server_url}/deploy",
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )
-            response.raise_for_status()
+            print (response)
             logger.info(f"Successfully notified deployment server for agent {agent_id}")
-            
     except Exception as e:
         logger.error(f"Failed to notify deployment server: {str(e)}")
-        return False
+        raise HTTPException(status_code=400, detail="Couldnt deploy the agent, Please email us for quick resolution")
+
     return True

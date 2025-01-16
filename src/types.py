@@ -33,9 +33,11 @@ class TelegramCredentials(BaseModel):
 class SignatureRequest(BaseModel):
     signature: str = Field(..., description="Signature is required")
     message: str = Field(..., description="Message is required")
+    public_key: str = Field(..., description="public_key is required")
+    
 
 class CheckRegistered(BaseModel):
-    address: str = Field(..., description="Address is required")
+    public_key: str = Field(..., description="Address is required")
 
 # Update the ClientConfig to use DiscordCredentials
 class ClientConfig(BaseModel):
