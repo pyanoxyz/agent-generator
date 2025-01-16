@@ -260,7 +260,7 @@ async def notify_deployment_server(
             
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"http://{deployment_server_url}/deploy",
+                f"{deployment_server_url}/deploy",
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )
