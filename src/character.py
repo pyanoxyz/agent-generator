@@ -14,6 +14,9 @@ from typing import Optional, List, Dict
 from fastapi import Form, UploadFile, File
 from langchain_together import ChatTogether
 from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+
 from fastapi import APIRouter, HTTPException, Depends, FastAPI
 from src.utils.create_utility_template import create_utility_template
 from src.utils.create_character_template import create_character_template
@@ -30,18 +33,40 @@ load_dotenv(root_dir / '.env')
 
 # Configure logging
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+
+llm = HuggingFaceEndpoint(
+    repo_id="microsoft/Phi-3-mini-4k-instruct",
+    task="text-generation",
+    max_new_tokens=512,
+    do_sample=False,
+    repetition_penalty=1.03,
+)
+
+chat = ChatHuggingFace(llm=llm, verbose=True)
 
 
 character_router = APIRouter()
 
 # Initialize Together AI client
 
-llm = ChatTogether(
-    model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    together_api_key=TOGETHER_API_KEY,
-    temperature=0.7,
-    max_tokens=16000
-)
+# llm = ChatTogether(
+#     model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+#     together_api_key=TOGETHER_API_KEY,
+#     temperature=0.7,
+#     max_tokens=16000
+# )
+
+# llm = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     groq_api_key=GROQ_API_KEY,
+#     temperature=0.7,
+#     max_tokens=16000
+# )
+
+
 
 def extract_json(response):
     """Extract the JSON from the response"""

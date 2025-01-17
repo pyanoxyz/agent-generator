@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from src.deploy import deploy_router
 from src.character import character_router
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 app = FastAPI()
 app.include_router(deploy_router, prefix="/api/v1")
@@ -38,4 +39,5 @@ if __name__ == "__main__":
         logger.error("env can either be production or local, please edit the .env file")
         sys.exit(1)
     logger.info(f"Env is {env}")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    workers = int(os.getenv("UVICORN_WORKERS", 10))  # Default to 4 workers if not specified in environment variables
+    uvicorn.run(app, host="0.0.0.0", port=9000,     workers=workers)

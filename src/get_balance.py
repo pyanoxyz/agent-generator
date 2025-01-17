@@ -35,7 +35,7 @@ def get_native_balance(address: str, url: str) -> float:
     headers = {"content-type": "application/json"}
     
     try:
-        response = requests.post(url, json=payload, headers=headers)
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
         print (response)
         print (f"Response from alchemy {response.json()["result"]}")
