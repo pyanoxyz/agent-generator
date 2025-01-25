@@ -198,3 +198,6 @@ websockets==13.1
 wrapt==1.17.0
 yarl==1.18.3
 zipp==3.21.0
+twikit==2.2.1
+discord.py==2.4.0
+python-telegram-bot==21.10
