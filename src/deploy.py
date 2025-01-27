@@ -19,7 +19,7 @@ from src.types import ClientConfig, SignatureRequest, AgentStatus, DeploymentRes
 from nacl.signing import SigningKey, VerifyKey
 from nacl.encoding import RawEncoder
 import base58
-import certifi
+# import certifi
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -34,12 +34,13 @@ mongodb_uri = os.getenv('MONGODB_URI')
 token_address = os.getenv('TOKEN_ADDRESS')
 balance_threshold = os.getenv('BALANCE_THRESHOLD')
 
-client = AsyncIOMotorClient(mongodb_uri, tlsCAFile=certifi.where())
+client = AsyncIOMotorClient(mongodb_uri)
 db = client.users  # Replace with your database name
 
 
 
 deploy_router = APIRouter()
+
 
 def verify_signature(signature: str, message: str) -> str:
     """
@@ -285,19 +286,16 @@ async def deploy(
             )
         except Exception as e:
             print(f"Failed to update database: {e}")
-            raise
+            raise HTTPException(status_code=500, detail="Failed to update agent")
 
         # Notify deployment server
-        try:
-            await notify_deployment_server(
-                agent_id=agent_id,
-                character_url=character_url,
-                knowledge_files=knowledge_urls,
-                client_config=client_config.dict()
-            )
-        except Exception as e:
-            print(f"Failed to notify deployment server: {e}")
-            raise
+        
+        await notify_deployment_server(
+            agent_id=agent_id,
+            character_url=character_url,
+            knowledge_files=knowledge_urls,
+            client_config=client_config.dict()
+        )
 
         # Return response
         return DeploymentResponse(

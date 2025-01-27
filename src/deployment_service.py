@@ -144,7 +144,6 @@ class DeploymentService:
             if client_value:
                 try:
                     parsed_value = json.loads(client_value)
-                
                     if client_type == "twitter":
                         creds = TwitterCredentials(**parsed_value)
                         client = Client('en-US')
