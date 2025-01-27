@@ -19,6 +19,7 @@ from src.types import ClientConfig, SignatureRequest, AgentStatus, DeploymentRes
 from nacl.signing import SigningKey, VerifyKey
 from nacl.encoding import RawEncoder
 import base58
+# import certifi
 
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
@@ -39,6 +40,7 @@ db = client.users  # Replace with your database name
 
 
 deploy_router = APIRouter()
+
 
 def verify_signature(signature: str, message: str) -> str:
     """
@@ -111,22 +113,30 @@ async def register(request: SignatureRequest):
     """
     try:
         # Verify the signature and get the address
-        verify_sol_signature(request.public_key, request.message, request.signature)
+        try:
+            verify_sol_signature(request.public_key, request.message, request.signature)
+        except Exception as e:
+            logger.error(f"Error verifying signature: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid signature")
 
         # Store in MongoDB
-        db.users.update_one(
+        try:
+            await db.users.update_one(
             {"address": request.public_key},
             {"$set": {
                 "address": request.public_key,
                 "last_verified": datetime.utcnow()
             }},
             upsert=True
-        )
+            )
+        except Exception as e:
+            logger.error(f"Error storing address in MongoDB: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to store address in MongoDB")
         
         return {"address": request.public_key, "verified": True}
     
     except Exception as e:
-        logger.error(f"Error in wallet verification: {str(e)}")
+        logger.error(f"Error in registration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -134,14 +144,13 @@ async def register(request: SignatureRequest):
 @deploy_router.post("/check_registered")
 async def check_registered(request: CheckRegistered):
     """
-    Verify a wallet address exists in MongoDB.
+    Check if a wallet address is registered in MongoDB.
     """
     try:
        
         deployment_service = DeploymentService(db)        
 
         await deployment_service.verify_user(request.public_key)
-        
         
         return {"address": request.public_key, "registered": True}
     
@@ -204,60 +213,83 @@ async def deploy(
         logger.info(f"agent_id = {agent_id} for address {public_key}")
         await deployment_service.verify_user(public_key)
         await agent_service.verify_allowed_agents(public_key)
+
         # Process character file
-        character_content, character_hash, json_content = await deployment_service.process_character_file(character)
+        try:
+            character_content, character_hash, json_content = await deployment_service.process_character_file(character)
+        except Exception as e:
+            logger.error(f"Failed to process character file: {str(e)}")
+            raise HTTPException(status_code=400, detail="Failed to process character file")
+
         await deployment_service.verify_character_uniqueness(public_key, character_hash)
         await deployment_service.verify_crypto_balance(public_key)
         
+        # Validate client configuration
+        try:
+            client_config = await deployment_service.validate_client_data(
+            client_twitter,
+            client_discord,
+            client_telegram
+            )
+        except ValidationError as e:
+            logger.error(f"Client configuration validation failed: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid client configuration")
+
         # Upload character to S3
-        character_url = await upload_character_to_s3(
+        try:
+            character_url = await upload_character_to_s3(
             public_key,
             agent_id,
             character_content,
             'application/json'
-        )
+            )
+        except Exception as e:
+            logger.error(f"Failed to upload character to S3: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload character to S3")
 
         # Process knowledge files
         knowledge_urls = []
 
         if knowledge_files:
-            for file in knowledge_files:
-                processed_file = await deployment_service.process_knowledge_file(file)
-                
-                knowledge_url = await upload_knowledge_to_s3(
+            try:
+                for file in knowledge_files:
+                    processed_file = await deployment_service.process_knowledge_file(file)
+                    knowledge_url = await upload_knowledge_to_s3(
                     public_key,
                     agent_id,
                     processed_file.content,
                     processed_file.filename,
                     processed_file.content_type
-                )
-                
-                knowledge_urls.append({
+                    )
+
+                    knowledge_urls.append({
                     "filename": processed_file.filename,
                     "content_type": processed_file.content_type,
                     "s3_url": knowledge_url
-                })
-
-        # Validate client configuration
-        client_config = deployment_service.validate_client_data(
-            client_twitter,
-            client_discord,
-            client_telegram
-        )
+                    })
+            except Exception as e:
+                logger.error(f"Failed to process and upload knowledge files: {str(e)}")
+                raise HTTPException(status_code=500, detail="Failed to process and upload knowledge files")
 
         # Verify crypto balance
 
         # Update database
-        await update_agent(
-            public_key,
-            agent_id,
-            json_content,
-            client_config,
-            character_url,
-            character_hash,
-            knowledge_urls
-        )
+        try:
+            await update_agent(
+                public_key,
+                agent_id,
+                json_content,
+                client_config,
+                character_url,
+                character_hash,
+                knowledge_urls
+            )
+        except Exception as e:
+            print(f"Failed to update database: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update agent")
 
+        # Notify deployment server
+        
         await notify_deployment_server(
             agent_id=agent_id,
             character_url=character_url,

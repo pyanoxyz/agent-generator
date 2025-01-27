@@ -32,6 +32,8 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    import sys
     env = os.getenv("ENV")
     print(env)
     if env not in ["production", "local"]:

@@ -15,6 +15,9 @@ import os
 from src.get_balance import get_native_balance
 import httpx
 import requests
+from twikit import Client
+from telegram import Bot
+from discord import Client as DiscordClient
 # Get the parent directory of the current file (src/)
 current_dir = Path(__file__).parent
 # Go up one level to get to the root directory where .env is
@@ -49,8 +52,6 @@ class DeploymentService:
         logger.info(f"User {address} is registered")
         return
     
-
-
 
     async def verify_character_uniqueness(self, address: str, content_hash: str) -> None:
         """Check if character already exists"""
@@ -127,7 +128,7 @@ class DeploymentService:
             await file.close()
 
 
-    def validate_client_data(self, twitter: Optional[str], discord: Optional[str], telegram: Optional[str]) -> Dict:
+    async def validate_client_data(self, twitter: Optional[str], discord: Optional[str], telegram: Optional[str]) -> ClientConfig:
         """Validate and process client configuration data"""
         client_data = {
             "twitter": None,
@@ -143,13 +144,47 @@ class DeploymentService:
             if client_value:
                 try:
                     parsed_value = json.loads(client_value)
-                
                     if client_type == "twitter":
-                        client_data[client_type] = TwitterCredentials(**parsed_value)
+                        creds = TwitterCredentials(**parsed_value)
+                        client = Client('en-US')
+                        try:
+                            await client.login(
+                                auth_info_1=creds.username,
+                                auth_info_2=creds.email,
+                                password=creds.password,
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to authenticate with Twitter: {str(e)}")
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Failed to authenticate with Twitter: {str(e)}"
+                            )
+                        client_data[client_type] = creds
                     elif client_type == "discord":
-                        client_data[client_type] = DiscordCredentials(**parsed_value)
+                        creds = DiscordCredentials(**parsed_value)
+                        client = DiscordClient(intents=discord.Intents.default())
+                        try:
+                             await client.login(creds.discord_api_token)
+                             await client.close()
+                        except Exception as e:
+                            logger.error(f"Failed to authenticate with Discord: {str(e)}")
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Failed to authenticate with Discord: {str(e)}"
+                            )
+                        client_data[client_type] = creds
                     elif client_type == "telegram":
-                        client_data[client_type] = TelegramCredentials(**parsed_value)
+                        creds = TelegramCredentials(**parsed_value)
+                        try:
+                            bot = Bot(token=creds.telegram_bot_token)
+                            await bot.get_me()
+                        except Exception as e:
+                            logger.error(f"Failed to authenticate with Telegram: {str(e)}")
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Failed to authenticate with Telegram: {str(e)}"
+                            )
+                        client_data[client_type] = creds
                     else:
                         raise HTTPException(
                         status_code=400,
